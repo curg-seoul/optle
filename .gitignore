@@ -1,0 +1,21 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+out/
+cache/
+*.tsbuildinfo
+
+# foundry
+**/lib/forge-std/
+broadcast/
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# logs / os
+*.log
+.DS_Store

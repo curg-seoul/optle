@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Solidity Gas Optimizer</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>⛽ Solidity Gas Optimizer</h1>
+      <span class="mock-badge" title="No AI is called yet — results are mocked for development.">MOCK · no AI called</span>
+    </header>
+
+    <main>
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Contract</h2>
+          <button id="sample" class="ghost">Load sample</button>
+        </div>
+        <textarea id="code" spellcheck="false" placeholder="Paste a single Solidity contract here…"></textarea>
+        <button id="optimize">Optimize gas →</button>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Result</h2>
+          <button id="copy" class="ghost" hidden>Copy</button>
+        </div>
+        <div id="empty" class="empty">Run the optimizer to see results.</div>
+        <div id="result" hidden>
+          <div class="gas-cards">
+            <div class="card"><span class="label">Gas before</span><span id="gasBefore" class="num"></span></div>
+            <div class="card"><span class="label">Gas after</span><span id="gasAfter" class="num"></span></div>
+            <div class="card saved"><span class="label">Saved</span><span id="saved" class="num"></span></div>
+          </div>
+          <p class="estimate-note">Gas figures are a mock estimate — the real pipeline measures them with <code>forge test --gas-report</code>.</p>
+
+          <h3>Changes</h3>
+          <ul id="changes" class="changes"></ul>
+
+          <h3>Optimized code</h3>
+          <pre id="optimized"></pre>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
