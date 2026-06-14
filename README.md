@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Optle" width="240" />
+</p>
+
 # Optle — pay-per-run gas optimization for Solidity
 
 **Optle turns gas optimization into a one-shot, onchain-paid service.** Upload a
