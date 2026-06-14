@@ -23,6 +23,7 @@ import { execSync } from "node:child_process";
 
 const WORK = process.env.WORK_DIR ?? "/work";
 const SKILL_SRC = process.env.OPTLE_SKILL_SRC ?? "/app/skill/solidity-gas-optimizer";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 process.env.PATH = `/root/.foundry/bin:${process.env.HOME ?? ""}/.foundry/bin:${process.env.PATH}`;
 
 function walk(dir, out = []) {
@@ -307,13 +308,29 @@ async function main() {
     agentMeta = await runAgent(base, model, outName, level, verifyMode);
     changes = parseReportChanges(base);
   } else {
+    // Mock pass is near-instant; pace it and emit agent-style progress so the UI
+    // shows the same optimize → result flow as a real run.
+    console.log("[agent] Surveying the project and reading contracts…");
+    await sleep(700);
+    for (const f of files) {
+      console.log(`[agent] · Read: ${relative(base, f)}`);
+      await sleep(400);
+    }
+    console.log("[agent] Applying behaviour-preserving gas optimizations…");
+    await sleep(800);
     for (const f of files) {
       const { out, changes: cs } = optimizeSource(originals.get(f));
       const dest = join(outAbs, relative(base, f));
       mkdirSync(dirname(dest), { recursive: true });
       writeFileSync(dest, out);
+      const summary = cs.length ? cs.map((c) => `${c.rule} ×${c.count}`).join(", ") : "no changes";
+      console.log(`[agent] · Write: ${join(outName, relative(base, f))} (${summary})`);
       changes.push(...cs);
+      await sleep(800);
     }
+    console.log("[agent] Writing OPTIMIZATION_REPORT.md…");
+    await sleep(500);
+    console.log(`[agent] Done — ${changes.length} transform(s) applied.`);
   }
 
   // Restore any in-place edits the agent may have made → src/ pristine.
