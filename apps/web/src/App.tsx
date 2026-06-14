@@ -226,7 +226,13 @@ export function App() {
                     )}
                     <div className="card saved"><span className="label">Saved</span><span className="num">−{result.savedPct ?? 0}%</span></div>
                   </div>
-                  {result.message && <p className="estimate-note">{result.message}</p>}
+                  {result.message && (
+                    <p className="estimate-note">
+                      {result.engine === "claude" && <span className="tag applied">Claude</span>}{" "}
+                      {result.message}
+                      {typeof result.costUsd === "number" && ` (AI cost: $${result.costUsd.toFixed(4)})`}
+                    </p>
+                  )}
 
                   <h3>Changes</h3>
                   <ul className="changes">

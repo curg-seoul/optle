@@ -4,9 +4,11 @@ import type { WalletClient } from "viem";
 export interface RunnerResult {
   ok: boolean;
   verified: boolean;
+  engine?: "claude" | "mock" | "none" | "error";
   gasBefore?: number;
   gasAfter?: number;
   savedPct?: number;
+  costUsd?: number;
   changes?: { rule: string; kind: string; description: string; count: number }[];
   message?: string;
 }
