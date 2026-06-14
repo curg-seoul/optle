@@ -63,6 +63,12 @@ async function facilitator(path: "/verify" | "/settle", body: unknown) {
 
 /** Route-specific middleware: gate one endpoint behind x402 payment. */
 export async function paymentGate(req: Request, res: Response, next: NextFunction) {
+  // Local-demo escape hatch: skip payment entirely (no facilitator needed).
+  if (config.payment.mode === "bypass") {
+    next();
+    return;
+  }
+
   const header = req.header("X-PAYMENT");
   if (!header) {
     send402(req, res, "X-PAYMENT header is required");

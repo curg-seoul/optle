@@ -6,6 +6,21 @@ import { optimize } from "./optimize.js";
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
+// Minimal CORS so a separately-hosted frontend can call us (dev uses a Vite
+// proxy, so this mainly matters for direct cross-origin calls). X-PAYMENT is a
+// custom request header; X-PAYMENT-RESPONSE must be readable by the client.
+app.use((_req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Headers", "Content-Type, X-PAYMENT");
+  res.header("Access-Control-Expose-Headers", "X-PAYMENT-RESPONSE");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  if (_req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
+
 // Unprotected health check.
 app.get("/health", (_req, res) => {
   res.json({
@@ -38,4 +53,7 @@ app.listen(config.port, () => {
   console.log(`  asset:       ${p.asset.address}`);
   console.log(`  pay to:      ${p.payTo}`);
   console.log(`  facilitator: ${config.facilitator.url}${config.facilitator.apiKey ? "" : "  (no API key set)"}`);
+  if (config.payment.mode === "bypass") {
+    console.warn("  ⚠️  PAYMENT_MODE=bypass — x402 gate is OFF (local demo only).");
+  }
 });

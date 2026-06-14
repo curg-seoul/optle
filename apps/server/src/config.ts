@@ -11,6 +11,10 @@ export const config = {
   port: Number(process.env.PORT ?? 8080),
 
   payment: {
+    // "enforce" (default) = real x402 gate. "bypass" = skip payment for local
+    // UI demos when no facilitator is available. NEVER ship "bypass".
+    mode: (process.env.PAYMENT_MODE ?? "enforce") as "enforce" | "bypass",
+
     // Network identifier as the FACILITATOR expects it (friendly name or CAIP-2
     // "eip155:5003"). x402's typed npm enum lacks Mantle, so we drive the wire
     // protocol ourselves — see x402.ts.
