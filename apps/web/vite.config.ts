@@ -1,8 +1,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// Dev: proxy API + health to the x402 server so the browser stays same-origin
-// (no CORS, and the X-PAYMENT custom header needs no preflight).
+// Dev proxies /api + /health to the backend so the browser stays same-origin
+// (no CORS, and the custom X-PAYMENT header needs no preflight). Defaults to the
+// deployed backend, so `npm run dev` works without running the backend locally.
+// Override with DEV_API_TARGET=http://localhost:8080 to use a local server.
+const API_TARGET = process.env.DEV_API_TARGET || "https://api.optle.hanjun.kim";
+
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -11,8 +15,8 @@ export default defineConfig({
     host: true,
     port: 5173,
     proxy: {
-      "/api": "http://localhost:8080",
-      "/health": "http://localhost:8080",
+      "/api": { target: API_TARGET, changeOrigin: true, secure: true },
+      "/health": { target: API_TARGET, changeOrigin: true, secure: true },
     },
   },
 });
