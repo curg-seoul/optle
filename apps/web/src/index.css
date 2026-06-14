@@ -197,3 +197,44 @@ pre {
   margin: 0;
   white-space: pre;
 }
+
+/* --- v2: dropzone, stages, download --- */
+.dropzone {
+  border: 1.5px dashed var(--border);
+  border-radius: 12px;
+  padding: 28px 18px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+  background: #14171d;
+}
+.dropzone:hover, .dropzone.over { border-color: var(--accent); background: #121a15; }
+.dropzone.has-file { border-style: solid; }
+.dz-empty strong, .dz-file strong { display: block; font-size: 15px; margin-bottom: 4px; }
+.dz-empty span, .dz-file span { color: var(--muted); font-size: 12px; }
+.muted { color: var(--muted); font-size: 13px; }
+
+.stages {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.stages li {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.stages li.active { color: #7dd3fc; border-color: #1c4a5a; background: #11303f; }
+.stages li.done { color: var(--accent); border-color: var(--accent-dim); background: var(--accent-dim); }
+
+a.primary.download {
+  display: inline-block;
+  text-decoration: none;
+  text-align: center;
+  margin-top: 8px;
+}

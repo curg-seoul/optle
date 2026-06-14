@@ -1,20 +1,32 @@
 import type { WalletClient } from "viem";
 
-export interface Change {
-  rule: string;
-  kind: "applied" | "detected";
-  description: string;
-  count: number;
+/** Result shape produced by the runner (mirrors apps/server jobs.ts). */
+export interface RunnerResult {
+  ok: boolean;
+  verified: boolean;
+  gasBefore?: number;
+  gasAfter?: number;
+  savedPct?: number;
+  changes?: { rule: string; kind: string; description: string; count: number }[];
+  message?: string;
 }
 
-export interface OptimizeResult {
-  mock: boolean;
-  original: string;
-  optimized: string;
-  changes: Change[];
-  gasBefore: number;
-  gasAfter: number;
-  savedPct: number;
+export interface UploadResult {
+  jobId: string;
+  tier: "small" | "medium" | "large";
+  priceUsd: number;
+  solFiles: number;
+  totalBytes: number;
+}
+
+export interface JobStatus {
+  jobId: string;
+  status: "pending" | "running" | "done" | "error";
+  stage: string;
+  tier: string;
+  priceUsd: number;
+  result?: RunnerResult;
+  error?: string;
 }
 
 export interface PaymentRequirements {
@@ -27,20 +39,13 @@ export interface PaymentRequirements {
   extra: { name: string; version: string };
 }
 
-/** Result of step 1: either the endpoint was free (bypass) or it wants payment. */
-export type OptimizeStart =
-  | { kind: "result"; result: OptimizeResult }
-  | { kind: "challenge"; requirements: PaymentRequirements };
-
-const ENDPOINT = "/api/optimize";
-
 function randomNonce(): `0x${string}` {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   return ("0x" +
     Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")) as `0x${string}`;
 }
 
-async function readResult(res: Response): Promise<OptimizeResult> {
+async function asJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
     throw new Error(detail.error || `Request failed (${res.status})`);
@@ -48,46 +53,40 @@ async function readResult(res: Response): Promise<OptimizeResult> {
   return res.json();
 }
 
+/** Step 1: upload a project .zip; server stores it and returns the tier price. */
+export async function uploadProject(file: File): Promise<UploadResult> {
+  const form = new FormData();
+  form.append("project", file);
+  const res = await fetch("/api/upload", { method: "POST", body: form });
+  return asJson<UploadResult>(res);
+}
+
 /**
- * Step 1 — POST without payment to discover the price.
- *
- * If the server returns 200 (e.g. PAYMENT_MODE=bypass) we're done and return the
- * result directly. On 402 we return the payment requirements so the UI can show
- * the amount and ask the user to confirm before signing.
+ * Step 2a: hit the gated optimize endpoint without payment to get the 402
+ * challenge (or 200 if the server runs in bypass mode).
  */
-export async function startOptimize(code: string): Promise<OptimizeStart> {
-  const headers = { "Content-Type": "application/json" };
-  const body = JSON.stringify({ code });
-
-  const res = await fetch(ENDPOINT, { method: "POST", headers, body });
+export async function requestPayment(
+  jobId: string,
+): Promise<{ kind: "running" } | { kind: "challenge"; requirements: PaymentRequirements }> {
+  const res = await fetch(`/api/optimize/${jobId}`, { method: "POST" });
   if (res.status !== 402) {
-    return { kind: "result", result: await readResult(res) };
+    await asJson(res); // throws on non-2xx
+    return { kind: "running" };
   }
-
   const challenge = await res.json();
   const reqs = challenge.accepts?.[0] as PaymentRequirements | undefined;
   if (!reqs) throw new Error("Malformed 402 response (no payment requirements).");
   return { kind: "challenge", requirements: reqs };
 }
 
-/**
- * Step 2 — confirm & pay. Builds & signs an EIP-3009 `transferWithAuthorization`
- * (gasless) from the requirements, attaches it as the X-PAYMENT header, retries.
- *
- * Signing the EIP-712 typed data here (rather than via x402-fetch) keeps the
- * client chain-agnostic, matching our hand-rolled server — so Mantle works even
- * though x402's npm enum doesn't list it.
- */
-export async function payAndOptimize(
-  code: string,
+/** Step 2b: sign the EIP-3009 authorization and retry with X-PAYMENT. */
+export async function payForJob(
+  jobId: string,
   reqs: PaymentRequirements,
   wallet: WalletClient | undefined,
   account: `0x${string}` | undefined,
   chainId: number | undefined,
-): Promise<OptimizeResult> {
-  const headers = { "Content-Type": "application/json" };
-  const body = JSON.stringify({ code });
-
+): Promise<void> {
   if (!wallet || !account || !chainId) {
     throw new Error("Connect your wallet (on Mantle Sepolia) to pay.");
   }
@@ -141,10 +140,20 @@ export async function payAndOptimize(
   };
   const xPayment = btoa(JSON.stringify(paymentPayload));
 
-  const res = await fetch(ENDPOINT, {
+  const res = await fetch(`/api/optimize/${jobId}`, {
     method: "POST",
-    headers: { ...headers, "X-PAYMENT": xPayment },
-    body,
+    headers: { "X-PAYMENT": xPayment },
   });
-  return readResult(res);
+  await asJson(res);
+}
+
+/** Step 3: poll job status. */
+export async function getStatus(jobId: string): Promise<JobStatus> {
+  return asJson<JobStatus>(await fetch(`/api/status/${jobId}`));
+}
+
+/** Step 4: get a presigned URL for the optimized result zip. */
+export async function getDownloadUrl(jobId: string): Promise<string> {
+  const { url } = await asJson<{ url: string }>(await fetch(`/api/download/${jobId}`));
+  return url;
 }

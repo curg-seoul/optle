@@ -1,11 +1,15 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useWalletClient, useReadContract } from "wagmi";
 import { formatUnits, erc20Abi } from "viem";
 import {
-  startOptimize,
-  payAndOptimize,
-  type OptimizeResult,
+  uploadProject,
+  requestPayment,
+  payForJob,
+  getStatus,
+  getDownloadUrl,
+  type UploadResult,
+  type JobStatus,
   type PaymentRequirements,
 } from "./x402";
 
@@ -22,110 +26,107 @@ function UsdcBalance() {
     args: address ? [address] : undefined,
     query: { enabled: !!address, refetchInterval: 10_000 },
   });
-
   if (!address) return null;
   const text =
     data === undefined
-      ? isLoading
-        ? "…"
-        : "—"
-      : Number(formatUnits(data, USDC_DECIMALS)).toLocaleString(undefined, {
-          maximumFractionDigits: 2,
-        });
+      ? isLoading ? "…" : "—"
+      : Number(formatUnits(data, USDC_DECIMALS)).toLocaleString(undefined, { maximumFractionDigits: 2 });
   return <span className="usdc-balance">{text} USDC</span>;
 }
 
-const SAMPLE = `// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+type Phase = "idle" | "uploading" | "ready" | "paying" | "running" | "done" | "error";
 
-contract Rewards {
-    address public owner;
-    uint256[] public amounts;
-    uint256 public total;
-
-    constructor() {
-        owner = msg.sender;
-    }
-
-    function add(uint256 amount) public {
-        require(amount > 0, "amount must be greater than zero");
-        amounts.push(amount);
-    }
-
-    function computeTotal() public returns (uint256) {
-        uint256 sum = 0;
-        for (uint256 i = 0; i < amounts.length; i++) {
-            sum = sum + amounts[i];
-        }
-        total = sum;
-        return sum;
-    }
-
-    function count() public view returns (uint256) {
-        return amounts.length;
-    }
-}
-`;
+const STAGE_LABEL: Record<string, string> = {
+  queued: "Queued",
+  downloading: "Loading project",
+  optimizing: "Optimizing",
+  verifying: "Verifying (forge test)",
+  packaging: "Packaging result",
+  complete: "Complete",
+};
+const STAGE_ORDER = ["queued", "downloading", "optimizing", "verifying", "packaging", "complete"];
 
 export function App() {
   const { address, chainId } = useAccount();
   const { data: walletClient } = useWalletClient();
 
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [upload, setUpload] = useState<UploadResult | null>(null);
+  const [status, setStatus] = useState<JobStatus | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<OptimizeResult | null>(null);
-  // When set, we've fetched the x402 challenge and are awaiting the user's
-  // confirmation to sign & pay (step 2).
-  const [pending, setPending] = useState<PaymentRequirements | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  // Step 1: ask the server what it costs (or run free if PAYMENT_MODE=bypass).
-  async function onOptimize() {
-    if (!code.trim()) {
-      setError("Paste a contract first (or click “Load sample”).");
+  function reset() {
+    setFile(null); setPhase("idle"); setUpload(null); setStatus(null);
+    setDownloadUrl(null); setError(null);
+  }
+
+  const onPickFile = useCallback(async (f: File) => {
+    if (!f.name.toLowerCase().endsWith(".zip")) {
+      setError("Please upload a .zip of your Solidity project.");
       return;
     }
-    setBusy(true);
     setError(null);
-    setResult(null);
-    setPending(null);
+    setFile(f);
+    setPhase("uploading");
     try {
-      const start = await startOptimize(code);
-      if (start.kind === "result") {
-        setResult(start.result); // free (bypass mode) — no payment needed
-      } else {
-        setPending(start.requirements); // show the price, await confirm
+      const result = await uploadProject(f);
+      setUpload(result);
+      setPhase("ready");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setPhase("idle");
+    }
+  }, []);
+
+  async function onPay() {
+    if (!upload) return;
+    setError(null);
+    setPhase("paying");
+    try {
+      const step = await requestPayment(upload.jobId);
+      if (step.kind === "challenge") {
+        await payForJob(upload.jobId, step.requirements as PaymentRequirements, walletClient ?? undefined, address, chainId);
       }
+      setPhase("running");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
+      setPhase("ready");
     }
   }
 
-  // Step 2: user confirmed — sign the EIP-3009 authorization and pay.
-  async function onConfirmPay() {
-    if (!pending) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await payAndOptimize(code, pending, walletClient ?? undefined, address, chainId);
-      setResult(r);
-      setPending(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
+  // Poll status while running.
+  useEffect(() => {
+    if (phase !== "running" || !upload) return;
+    let alive = true;
+    const tick = async () => {
+      try {
+        const s = await getStatus(upload.jobId);
+        if (!alive) return;
+        setStatus(s);
+        if (s.status === "done") {
+          const url = await getDownloadUrl(upload.jobId);
+          if (!alive) return;
+          setDownloadUrl(url);
+          setPhase("done");
+        } else if (s.status === "error") {
+          setError(s.error ?? "Optimization failed.");
+          setPhase("error");
+        }
+      } catch (e) {
+        if (alive) { setError(e instanceof Error ? e.message : String(e)); setPhase("error"); }
+      }
+    };
+    tick();
+    const id = setInterval(tick, 2000);
+    return () => { alive = false; clearInterval(id); };
+  }, [phase, upload]);
 
-  // Human-readable price from the actual 402 challenge (6-decimal USDC).
-  const priceText = pending
-    ? `${Number(formatUnits(BigInt(pending.maxAmountRequired), USDC_DECIMALS)).toLocaleString(
-        undefined,
-        { maximumFractionDigits: 6 },
-      )} USDC`
-    : null;
+  const result = status?.result;
+  const busy = phase === "uploading" || phase === "paying" || phase === "running";
 
   return (
     <>
@@ -140,83 +141,113 @@ export function App() {
 
       <main>
         <section className="panel">
-          <div className="panel-head">
-            <h2>Contract</h2>
-            <button className="ghost" onClick={() => setCode(SAMPLE)}>Load sample</button>
+          <div className="panel-head"><h2>Project</h2></div>
+
+          <div
+            className={`dropzone${dragOver ? " over" : ""}${file ? " has-file" : ""}`}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) onPickFile(f); }}
+            onClick={() => inputRef.current?.click()}
+          >
+            <input
+              ref={inputRef} type="file" accept=".zip" hidden
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) onPickFile(f); }}
+            />
+            {file ? (
+              <div className="dz-file">
+                <strong>{file.name}</strong>
+                <span>{(file.size / 1024).toFixed(1)} KB</span>
+              </div>
+            ) : (
+              <div className="dz-empty">
+                <strong>Drop your project .zip here</strong>
+                <span>or click to choose — a Foundry project (with foundry.toml) gets verified</span>
+              </div>
+            )}
           </div>
-          <textarea
-            spellCheck={false}
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            placeholder="Paste a single Solidity contract here…"
-          />
-          {!pending ? (
-            <button className="primary" onClick={onOptimize} disabled={busy}>
-              {busy ? "Working…" : "Optimize gas →"}
-            </button>
-          ) : (
+
+          {phase === "uploading" && <p className="muted">Uploading & analyzing…</p>}
+
+          {upload && phase !== "idle" && (
             <div className="pay-confirm">
               <div className="pay-line">
-                <span className="pay-label">Payment required</span>
-                <span className="pay-amount">{priceText}</span>
+                <span className="pay-label">{upload.solFiles} .sol files · {(upload.totalBytes / 1024).toFixed(1)} KB · tier <b>{upload.tier}</b></span>
+                <span className="pay-amount">${upload.priceUsd.toFixed(2)}</span>
               </div>
               <div className="pay-actions">
-                <button className="ghost" onClick={() => setPending(null)} disabled={busy}>
-                  Cancel
-                </button>
-                <button className="primary" onClick={onConfirmPay} disabled={busy}>
-                  {busy ? "Signing…" : `Confirm & pay ${priceText} →`}
-                </button>
+                <button className="ghost" onClick={reset} disabled={busy}>Reset</button>
+                {phase === "ready" && (
+                  <button className="primary" onClick={onPay} disabled={busy}>
+                    {`Confirm & pay $${upload.priceUsd.toFixed(2)} →`}
+                  </button>
+                )}
+                {phase === "paying" && <button className="primary" disabled>Signing…</button>}
               </div>
             </div>
           )}
+
           {error && <p className="error">{error}</p>}
         </section>
 
         <section className="panel">
-          <div className="panel-head">
-            <h2>Result</h2>
-          </div>
-          {!result ? (
-            <div className="empty">Pay &amp; run the optimizer to see results.</div>
+          <div className="panel-head"><h2>Result</h2></div>
+
+          {phase === "idle" || phase === "uploading" || phase === "ready" || phase === "paying" ? (
+            <div className="empty">Upload a project and pay to start the optimizer.</div>
           ) : (
             <div className="result">
-              <div className="gas-cards">
-                <div className="card">
-                  <span className="label">Gas before</span>
-                  <span className="num">{result.gasBefore.toLocaleString()}</span>
-                </div>
-                <div className="card">
-                  <span className="label">Gas after</span>
-                  <span className="num">{result.gasAfter.toLocaleString()}</span>
-                </div>
-                <div className="card saved">
-                  <span className="label">Saved</span>
-                  <span className="num">−{result.savedPct}%</span>
-                </div>
-              </div>
-              {result.mock && (
-                <p className="estimate-note">
-                  Optimization is currently a <strong>mock</strong> (no AI called).
-                  Gas figures are estimates; the real pipeline measures with
-                  <code> forge test --gas-report</code>.
-                </p>
+              {/* progress */}
+              <ol className="stages">
+                {STAGE_ORDER.filter((s) => s !== "complete").map((s) => {
+                  const cur = status?.stage ?? "queued";
+                  const done = STAGE_ORDER.indexOf(cur) > STAGE_ORDER.indexOf(s) || phase === "done";
+                  const active = cur === s && phase === "running";
+                  return (
+                    <li key={s} className={done ? "done" : active ? "active" : ""}>
+                      {STAGE_LABEL[s]}
+                    </li>
+                  );
+                })}
+              </ol>
+
+              {phase === "running" && <p className="muted">Working… ({STAGE_LABEL[status?.stage ?? "queued"]})</p>}
+
+              {phase === "done" && result && (
+                <>
+                  <div className="gas-cards">
+                    {result.verified ? (
+                      <>
+                        <div className="card"><span className="label">Gas before</span><span className="num">{result.gasBefore?.toLocaleString()}</span></div>
+                        <div className="card"><span className="label">Gas after</span><span className="num">{result.gasAfter?.toLocaleString()}</span></div>
+                      </>
+                    ) : (
+                      <div className="card"><span className="label">Verification</span><span className="num" style={{ fontSize: 16 }}>estimate</span></div>
+                    )}
+                    <div className="card saved"><span className="label">Saved</span><span className="num">−{result.savedPct ?? 0}%</span></div>
+                  </div>
+                  {result.message && <p className="estimate-note">{result.message}</p>}
+
+                  <h3>Changes</h3>
+                  <ul className="changes">
+                    {(!result.changes || result.changes.length === 0) && <li>No optimization opportunities detected.</li>}
+                    {result.changes?.map((c, i) => (
+                      <li key={i}>
+                        <span className={`tag ${c.kind}`}>{c.kind}</span>
+                        <span>{c.description}</span>
+                        <span className="count">×{c.count}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  {downloadUrl && (
+                    <a className="primary download" href={downloadUrl} target="_blank" rel="noreferrer">
+                      Download optimized project (.zip) ↓
+                    </a>
+                  )}
+                  <button className="ghost" onClick={reset} style={{ marginTop: 10 }}>Optimize another</button>
+                </>
               )}
-
-              <h3>Changes</h3>
-              <ul className="changes">
-                {result.changes.length === 0 && <li>No optimization opportunities detected.</li>}
-                {result.changes.map((c, i) => (
-                  <li key={i}>
-                    <span className={`tag ${c.kind}`}>{c.kind}</span>
-                    <span>{c.description}</span>
-                    <span className="count">×{c.count}</span>
-                  </li>
-                ))}
-              </ul>
-
-              <h3>Optimized code</h3>
-              <pre>{result.optimized}</pre>
             </div>
           )}
         </section>
