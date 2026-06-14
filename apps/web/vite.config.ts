@@ -6,6 +6,10 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   server: {
+    // Bind to 0.0.0.0 so the dev server is reachable from the host machine when
+    // running inside a dev container / remote VM (default is localhost-only).
+    host: true,
+    port: 5173,
     proxy: {
       "/api": "http://localhost:8080",
       "/health": "http://localhost:8080",

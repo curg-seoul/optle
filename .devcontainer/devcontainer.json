@@ -3,5 +3,10 @@
   "features": {
       "ghcr.io/devcontainers/features/node:2.0.0": {},
       "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
+  },
+  "forwardPorts": [5173, 8080],
+  "portsAttributes": {
+    "5173": { "label": "web (vite)", "onAutoForward": "notify" },
+    "8080": { "label": "x402 server" }
   }
 }
