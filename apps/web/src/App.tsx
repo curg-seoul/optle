@@ -45,7 +45,7 @@ function LogPanel({ logs }: { logs?: string[] }) {
   if (!logs || logs.length === 0) return null;
   return (
     <details className="logbox" open>
-      <summary>Runner logs ({logs.length})</summary>
+      <summary>Runner Logs ({logs.length})</summary>
       <pre className="log" ref={ref}>
         {logs.map((l, i) => {
           let cls = "";
@@ -63,7 +63,7 @@ function DiffView({ diffs }: { diffs?: { file: string; diff: string }[] }) {
   if (!diffs || diffs.length === 0) return null;
   return (
     <div className="diffs">
-      <h3>Changes (original → optimized)</h3>
+      <h3>Optimization Diff</h3>
       {diffs.map((d, i) => (
         <details key={d.file} open={i === 0} className="diff-file">
           <summary>{d.file}</summary>
@@ -90,15 +90,15 @@ type Phase = "idle" | "uploading" | "ready" | "paying" | "running" | "done" | "e
 
 const STAGE_LABEL: Record<string, string> = {
   queued: "Queued",
-  downloading: "Loading project",
-  optimizing: "Optimizing",
-  verifying: "Verifying (forge test)",
-  packaging: "Packaging result",
+  downloading: "Downloading Project",
+  optimizing: "Optimizing Contracts",
+  verifying: "Verifying Gas Savings",
+  packaging: "Packaging Result",
   complete: "Complete",
 };
 const STAGE_ORDER = ["queued", "downloading", "optimizing", "verifying", "packaging", "complete"];
 
-const STEPS = ["Upload & pay", "Optimize", "Result"];
+const STEPS = ["Upload & Analyze", "Optimization", "Results"];
 
 export function App() {
   const { address, chainId } = useAccount();
@@ -201,8 +201,11 @@ export function App() {
     <div className="app-shell">
       <div className="bg-mesh" aria-hidden />
       <header className="app-header">
-        <a className="brand" href="/" aria-label="Optle home"><Logo /><span>Optle</span></a>
-        <span className="net-badge">Mantle Sepolia · x402</span>
+        <a className="brand" href="/"><Logo size={28} /><span>Optle</span></a>
+        <div className="net-badge-wrap">
+          <span className="net-dot"></span>
+          <span className="net-label">Mantle Sepolia</span>
+        </div>
         <div className="header-right">
           <ThemeToggle />
           <UsdcBalance />
@@ -211,7 +214,6 @@ export function App() {
       </header>
 
       <main className="app-wrap">
-        {/* stepper */}
         <ol className="stepper">
           {STEPS.map((label, i) => {
             const n = i + 1;
@@ -226,22 +228,21 @@ export function App() {
         </ol>
 
         <section className="step-card">
-          {/* ---------- STEP 1: upload & pay ---------- */}
           {step === 1 && (
             <>
               <div className="card-head">
-                <h2>Upload a Foundry project</h2>
-                <button className="ghost" onClick={loadSample} disabled={busy}>Load sample</button>
+                <h2>Optimize Your Project</h2>
+                <button className="ghost" onClick={loadSample} disabled={busy}>Load Sample</button>
               </div>
 
               <div className="level-select">
-                <span className="level-label">Optimization level</span>
+                <span className="level-label">Target Optimization Intensity</span>
                 <div className="level-opts">
                   <button className={`level-opt${level === 1 ? " on" : ""}`} onClick={() => setLevel(1)} disabled={busy || phase !== "idle"}>
-                    <strong>Level 1</strong><span>function-body only · fast</span>
+                    <strong>Standard</strong><span>Safe rewrites, fast results</span>
                   </button>
                   <button className={`level-opt${level === 2 ? " on" : ""}`} onClick={() => setLevel(2)} disabled={busy || phase !== "idle"}>
-                    <strong>Level 2</strong><span>+ storage redesign · deeper</span>
+                    <strong>Aggressive</strong><span>Deeper storage & logic refactoring</span>
                   </button>
                 </div>
               </div>
@@ -259,28 +260,31 @@ export function App() {
                   <div className="dz-file"><strong>{file.name}</strong><span>{(file.size / 1024).toFixed(1)} KB</span></div>
                 ) : (
                   <div className="dz-empty">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="dz-icon">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="dz-icon">
                       <path d="M12 16V4M7 9l5-5 5 5M5 20h14" />
                     </svg>
-                    <strong>Drop your project .zip here</strong>
-                    <span>or click to choose — a Foundry project (foundry.toml) gets verified</span>
+                    <strong>Drop Foundry Project .zip</strong>
+                    <span>Must contain foundry.toml</span>
                   </div>
                 )}
               </div>
 
-              {phase === "uploading" && <p className="muted">Uploading &amp; analyzing…</p>}
+              {phase === "uploading" && <p className="muted">Analyzing source files…</p>}
 
               {upload && (
                 <div className="pay-confirm">
                   <div className="pay-line">
-                    <span className="pay-label">{upload.solFiles} .sol files · {(upload.totalBytes / 1024).toFixed(1)} KB · tier <b>{upload.tier}</b> · Level <b>{upload.level}</b></span>
+                    <div className="pay-details">
+                      <span className="pay-label">{upload.solFiles} Files · {(upload.totalBytes / 1024).toFixed(1)} KB</span>
+                      <div className="pay-tier">Tier {upload.tier} · Level {upload.level}</div>
+                    </div>
                     <span className="pay-amount">${upload.priceUsd.toFixed(2)}</span>
                   </div>
                   <div className="pay-actions">
-                    <button className="ghost" onClick={startOver} disabled={busy}>Reset</button>
+                    <button className="ghost" onClick={startOver} disabled={busy}>Cancel</button>
                     {phase === "paying"
-                      ? <button className="primary" disabled>Signing…</button>
-                      : <button className="primary" onClick={onPay} disabled={busy}>{`Confirm & pay $${upload.priceUsd.toFixed(2)} →`}</button>}
+                      ? <button className="primary" disabled>Awaiting Signature…</button>
+                      : <button className="primary" onClick={onPay} disabled={busy}>{`Pay $${upload.priceUsd.toFixed(2)} & Optimize`}</button>}
                   </div>
                 </div>
               )}
@@ -289,12 +293,11 @@ export function App() {
             </>
           )}
 
-          {/* ---------- STEP 2: optimize ---------- */}
           {step === 2 && phase !== "error" && (
             <>
               <div className="card-head">
-                <h2>Optimizing</h2>
-                <button className="ghost" onClick={startOver}>Start over</button>
+                <h2>Optimizing Contracts</h2>
+                <button className="ghost" onClick={startOver}>Restart</button>
               </div>
               <ol className="stages">
                 {STAGE_ORDER.filter((s) => s !== "complete").map((s) => {
@@ -303,27 +306,29 @@ export function App() {
                   return <li key={s} className={done ? "done" : active ? "active" : ""}>{STAGE_LABEL[s]}</li>;
                 })}
               </ol>
-              <p className="muted">Working… ({STAGE_LABEL[curStage]})</p>
+              <div className="running-msg">
+                <span className="loader"></span>
+                <p className="muted">Running {STAGE_LABEL[curStage]}...</p>
+              </div>
               <LogPanel logs={status?.logs} />
             </>
           )}
 
-          {/* ---------- STEP 3: result ---------- */}
           {step === 3 && result && (
             <>
               <div className="card-head">
-                <h2>Optimized {result.engine === "claude" && <span className="tag applied">Claude</span>}</h2>
-                <button className="ghost" onClick={startOver}>Start over</button>
+                <h2>Optimization Successful</h2>
+                <button className="ghost" onClick={startOver}>New Project</button>
               </div>
 
               <div className="gas-cards">
                 {result.verified ? (
                   <>
-                    <div className="card"><span className="label">Gas before</span><span className="num">{result.gasBefore?.toLocaleString()}</span></div>
-                    <div className="card"><span className="label">Gas after</span><span className="num">{result.gasAfter?.toLocaleString()}</span></div>
+                    <div className="card"><span className="label">Base Gas</span><span className="num">{result.gasBefore?.toLocaleString()}</span></div>
+                    <div className="card"><span className="label">Optimized</span><span className="num">{result.gasAfter?.toLocaleString()}</span></div>
                   </>
                 ) : (
-                  <div className="card"><span className="label">Verification</span><span className="num" style={{ fontSize: 16 }}>estimate</span></div>
+                  <div className="card"><span className="label">Gas Savings</span><span className="num" style={{ fontSize: 16 }}>Estimated</span></div>
                 )}
                 <div className="card saved"><span className="label">Saved</span><span className="num">−{result.savedPct ?? 0}%</span></div>
               </div>
@@ -331,25 +336,23 @@ export function App() {
               {result.message && (
                 <p className="estimate-note">
                   {result.message}
-                  {typeof result.costUsd === "number" && ` (AI cost: $${result.costUsd.toFixed(4)})`}
                 </p>
               )}
 
               <DiffView diffs={result.diffs} />
 
               {downloadUrl && (
-                <a className="primary download" href={downloadUrl} target="_blank" rel="noreferrer">
-                  Download optimized project (.zip) ↓
+                <a className="btn-primary" href={downloadUrl} target="_blank" rel="noreferrer" style={{ width: '100%', marginTop: '24px' }}>
+                  Download Optimized Project (.zip)
                 </a>
               )}
             </>
           )}
 
-          {/* error during a running job */}
           {phase === "error" && (
             <div className="error-block">
               <p className="error">{error}</p>
-              <button className="ghost" onClick={startOver}>Start over</button>
+              <button className="primary" onClick={startOver}>Try Again</button>
               <LogPanel logs={status?.logs} />
             </div>
           )}
@@ -358,3 +361,4 @@ export function App() {
     </div>
   );
 }
+
