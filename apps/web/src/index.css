@@ -488,13 +488,14 @@ button.ghost:hover {
   line-height: 1.6;
 }
 
-.dl {
-  /* size to the longest line so the row background spans the full width even when
-     the diff is scrolled horizontally; min-width keeps short lines full-bleed. */
-  display: block;
+/* The body sizes to the longest line (max-content); each row fills it, so every
+   row's background spans the full line width even when scrolled horizontally. */
+.diff-body {
   width: max-content;
   min-width: 100%;
-  box-sizing: border-box;
+}
+.dl {
+  display: block;
   padding: 0 20px;
   white-space: pre;
 }

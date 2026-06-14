@@ -68,17 +68,19 @@ function DiffView({ diffs }: { diffs?: { file: string; diff: string }[] }) {
         <details key={d.file} open={i === 0} className="diff-file">
           <summary>{d.file}</summary>
           <pre className="diff">
-            {d.diff.split("\n").map((line, j) => {
-              if (
-                line.startsWith("diff --git") || line.startsWith("index ") ||
-                line.startsWith("--- ") || line.startsWith("+++ ")
-              ) return null;
-              let cls = "ctx";
-              if (line.startsWith("@@")) cls = "hunk";
-              else if (line.startsWith("+")) cls = "add";
-              else if (line.startsWith("-")) cls = "del";
-              return <div key={j} className={`dl ${cls}`}>{line || " "}</div>;
-            })}
+            <div className="diff-body">
+              {d.diff.split("\n").map((line, j) => {
+                if (
+                  line.startsWith("diff --git") || line.startsWith("index ") ||
+                  line.startsWith("--- ") || line.startsWith("+++ ")
+                ) return null;
+                let cls = "ctx";
+                if (line.startsWith("@@")) cls = "hunk";
+                else if (line.startsWith("+")) cls = "add";
+                else if (line.startsWith("-")) cls = "del";
+                return <div key={j} className={`dl ${cls}`}>{line || " "}</div>;
+              })}
+            </div>
           </pre>
         </details>
       ))}
