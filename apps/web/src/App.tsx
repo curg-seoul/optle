@@ -108,6 +108,16 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [theme, setTheme] = useState<"light" | "dark">(
+    () => (document.documentElement.getAttribute("data-theme") as "light" | "dark") || "dark",
+  );
+
+  function toggleTheme() {
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("theme", next); } catch { /* ignore */ }
+  }
 
   function reset() {
     setFile(null); setPhase("idle"); setUpload(null); setStatus(null);
@@ -197,6 +207,14 @@ export function App() {
         <h1>⛽ Solidity Gas Optimizer</h1>
         <span className="mock-badge">Mantle Sepolia · x402</span>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <button
+            className="theme-toggle"
+            onClick={toggleTheme}
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            title={theme === "dark" ? "Light mode" : "Dark mode"}
+          >
+            {theme === "dark" ? "☀️" : "🌙"}
+          </button>
           <UsdcBalance />
           <ConnectButton />
         </div>
