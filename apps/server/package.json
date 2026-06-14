@@ -7,11 +7,16 @@
     "start": "tsx src/index.ts"
   },
   "dependencies": {
+    "adm-zip": "^0.5.16",
+    "cos-nodejs-sdk-v5": "^2.14.6",
     "dotenv": "^16.4.7",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
     "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.12",
     "@types/node": "^22.10.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.0"

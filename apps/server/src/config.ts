@@ -45,6 +45,28 @@ export const config = {
     apiKey: process.env.FACILITATOR_API_KEY, // Bearer; required for live verify/settle
   },
 
+  // Tencent COS — stores each job's input.zip / output.zip.
+  cos: {
+    secretId: process.env.COS_SECRET_ID ?? "",
+    secretKey: process.env.COS_SECRET_KEY ?? "",
+    bucket: process.env.COS_BUCKET ?? "", // e.g. optle-jobs-1250000000
+    region: process.env.COS_REGION ?? "ap-singapore",
+  },
+
+  // Isolated optimization runner (sibling Docker container per job).
+  runner: {
+    image: process.env.RUNNER_IMAGE ?? "optle-runner",
+    // Where the server keeps per-job working dirs (mounted into this container).
+    jobsDir: process.env.JOBS_DIR ?? "/jobs",
+    // The SAME directory's path on the Docker host, so `docker run -v` resolves
+    // it correctly when we spawn a sibling container. Falls back to jobsDir when
+    // the server runs directly on the host (no container).
+    hostJobsDir: process.env.HOST_JOBS_DIR ?? process.env.JOBS_DIR ?? "/jobs",
+    timeoutMs: Number(process.env.RUNNER_TIMEOUT_MS ?? 10 * 60 * 1000),
+    memory: process.env.RUNNER_MEMORY ?? "2g",
+    cpus: process.env.RUNNER_CPUS ?? "2",
+  },
+
   // AI — read only after deploy; dev uses the mock (no API calls).
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   model: process.env.CLAUDE_MODEL ?? "claude-opus-4-8",

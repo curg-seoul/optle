@@ -19,12 +19,12 @@ import { config } from "./config.js";
 
 const X402_VERSION = 1;
 
-function buildRequirements(req: Request) {
+function buildRequirements(req: Request, amountBaseUnits: string) {
   const p = config.payment;
   return {
     scheme: "exact",
     network: p.network,
-    maxAmountRequired: p.amountBaseUnits,
+    maxAmountRequired: amountBaseUnits,
     resource: `${req.protocol}://${req.get("host")}${req.originalUrl}`,
     description: "Optimize a single Solidity contract's gas usage",
     mimeType: "application/json",
@@ -37,11 +37,11 @@ function buildRequirements(req: Request) {
   };
 }
 
-function send402(req: Request, res: Response, error: string) {
+function send402(req: Request, res: Response, error: string, amountBaseUnits: string) {
   res.status(402).json({
     x402Version: X402_VERSION,
     error,
-    accepts: [buildRequirements(req)],
+    accepts: [buildRequirements(req, amountBaseUnits)],
   });
 }
 
@@ -61,53 +61,67 @@ async function facilitator(path: "/verify" | "/settle", body: unknown) {
   return res.json() as Promise<any>;
 }
 
-/** Route-specific middleware: gate one endpoint behind x402 payment. */
-export async function paymentGate(req: Request, res: Response, next: NextFunction) {
-  // Local-demo escape hatch: skip payment entirely (no facilitator needed).
-  if (config.payment.mode === "bypass") {
-    next();
-    return;
-  }
-
-  const header = req.header("X-PAYMENT");
-  if (!header) {
-    send402(req, res, "X-PAYMENT header is required");
-    return;
-  }
-
-  let paymentPayload: unknown;
-  try {
-    paymentPayload = JSON.parse(Buffer.from(header, "base64").toString("utf8"));
-  } catch {
-    send402(req, res, "Invalid X-PAYMENT header (expected base64-encoded JSON)");
-    return;
-  }
-
-  const paymentRequirements = buildRequirements(req);
-
-  try {
-    const verify = await facilitator("/verify", {
-      x402Version: X402_VERSION,
-      paymentPayload,
-      paymentRequirements,
-    });
-    if (!verify?.isValid) {
-      send402(req, res, verify?.invalidReason ?? "payment verification failed");
+/**
+ * Route-specific middleware factory: gate an endpoint behind x402 payment.
+ *
+ * `resolveAmount` returns the price (USDC base units) for this request — e.g.
+ * the per-job tier price. If it returns undefined the resource is unknown (404).
+ * Omit it to charge the static config price.
+ */
+export function paymentGate(resolveAmount?: (req: Request) => string | undefined) {
+  return async function gate(req: Request, res: Response, next: NextFunction) {
+    const amount = resolveAmount ? resolveAmount(req) : config.payment.amountBaseUnits;
+    if (amount === undefined) {
+      res.status(404).json({ error: "unknown job" });
       return;
     }
 
-    const settlement = await facilitator("/settle", {
-      x402Version: X402_VERSION,
-      paymentPayload,
-      paymentRequirements,
-    });
-    // Standard x402: hand the settlement receipt back to the client.
-    res.setHeader(
-      "X-PAYMENT-RESPONSE",
-      Buffer.from(JSON.stringify(settlement)).toString("base64"),
-    );
-    next();
-  } catch (err) {
-    res.status(502).json({ error: "facilitator error", detail: String(err) });
-  }
+    // Local-demo escape hatch: skip payment entirely (no facilitator needed).
+    if (config.payment.mode === "bypass") {
+      next();
+      return;
+    }
+
+    const header = req.header("X-PAYMENT");
+    if (!header) {
+      send402(req, res, "X-PAYMENT header is required", amount);
+      return;
+    }
+
+    let paymentPayload: unknown;
+    try {
+      paymentPayload = JSON.parse(Buffer.from(header, "base64").toString("utf8"));
+    } catch {
+      send402(req, res, "Invalid X-PAYMENT header (expected base64-encoded JSON)", amount);
+      return;
+    }
+
+    const paymentRequirements = buildRequirements(req, amount);
+
+    try {
+      const verify = await facilitator("/verify", {
+        x402Version: X402_VERSION,
+        paymentPayload,
+        paymentRequirements,
+      });
+      if (!verify?.isValid) {
+        send402(req, res, verify?.invalidReason ?? "payment verification failed", amount);
+        return;
+      }
+
+      const settlement = await facilitator("/settle", {
+        x402Version: X402_VERSION,
+        paymentPayload,
+        paymentRequirements,
+      });
+      // Standard x402: hand the settlement receipt back to the client.
+      res.setHeader(
+        "X-PAYMENT-RESPONSE",
+        Buffer.from(JSON.stringify(settlement)).toString("base64"),
+      );
+      next();
+    } catch (err) {
+      res.status(502).json({ error: "facilitator error", detail: String(err) });
+    }
+  };
 }
