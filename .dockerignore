@@ -1,0 +1,3 @@
+# Runner build context is the repo root. Keep the exhaustive pattern corpus out of
+# the image so the agent only ever loads the condensed pattern-corpus.md (faster).
+skills/gas-optimizer/references/pattern-corpus-full.md

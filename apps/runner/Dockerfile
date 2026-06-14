@@ -3,7 +3,7 @@
 FROM node:20-bookworm-slim
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends curl git ca-certificates unzip \
+  && apt-get install -y --no-install-recommends curl git ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 # Install Foundry (forge/cast/anvil).
@@ -20,11 +20,10 @@ COPY apps/runner/package.json ./
 # Claude Agent SDK (real engine). Installed here; only loaded when ANTHROPIC_API_KEY is set.
 RUN npm install --omit=dev
 COPY apps/runner/run.mjs ./
-# The packaged solidity-gas-optimizer skill (SKILL.md + references/). Unzipped to
-# /app/skill/solidity-gas-optimizer; run.mjs copies it into the project's
-# .claude/skills so the agent loads it natively (references resolve relative).
-COPY solidity-gas-optimizer.skill /app/solidity-gas-optimizer.skill
-RUN mkdir -p /app/skill && unzip -q /app/solidity-gas-optimizer.skill -d /app/skill && rm /app/solidity-gas-optimizer.skill
+# The solidity-gas-optimizer skill (SKILL.md + references/), now an extracted dir
+# in the repo. run.mjs copies it into the project's .claude/skills at runtime so
+# the agent loads it natively (references resolve relative). Dir name = skill name.
+COPY skills/gas-optimizer /app/skill/solidity-gas-optimizer
 ENV OPTLE_SKILL_SRC=/app/skill/solidity-gas-optimizer
 
 # Operates on the mounted /work directory.
