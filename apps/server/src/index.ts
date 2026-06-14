@@ -165,6 +165,7 @@ app.listen(config.port, () => {
   else if (hasKey) engine = "Claude (ANTHROPIC_API_KEY)";
   else engine = "mock (no ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN set)";
   console.log(`  engine:      ${engine}`);
+  console.log(`  verify:      ${config.runner.verify ? "on (full Foundry test/gas loop)" : "off (fast mode — verification skipped)"}`);
 
   if (config.payment.mode === "bypass") {
     console.warn("  ⚠️  PAYMENT_MODE=bypass — x402 gate is OFF (local demo only).");
