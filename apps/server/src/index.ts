@@ -69,13 +69,15 @@ app.post("/api/upload", upload.single("project"), async (req, res) => {
       return;
     }
     await putFile(inputKey(jobId), tmp);
-    createJob(jobId, sizing);
+    const level = req.body?.level === "2" ? 2 : 1; // optimization depth (default 1)
+    createJob(jobId, sizing, level);
     res.json({
       jobId,
       tier: sizing.tier,
       priceUsd: sizing.priceUsd,
       solFiles: sizing.solFiles,
       totalBytes: sizing.totalBytes,
+      level,
     });
   } catch (err) {
     res.status(500).json({ error: "upload failed", detail: String(err) });

@@ -101,7 +101,7 @@ function optimizeSource(code) {
 }
 
 /** Real engine: run the Claude Agent SDK with the skill loaded natively. */
-async function runAgent(base, model, outName) {
+async function runAgent(base, model, outName, level) {
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
 
   // Make the skill discoverable as a project skill (references resolve relative).
@@ -113,13 +113,21 @@ async function runAgent(base, model, outName) {
     console.error(`[runner] skill source not found at ${SKILL_SRC}`);
   }
 
+  const levelText =
+    level === 2
+      ? `Apply LEVEL 2 optimizations: you MAY redesign the internal storage layout — struct/slot ` +
+        `packing, smaller integer types, bitmaps, UDVTs — because this is a fresh new deployment ` +
+        `with no proxy. Preserve the EXTERNAL interface exactly (function signatures, ` +
+        `visibility-as-callable, events, return shapes); custom errors are encouraged.`
+      : `Apply LEVEL 1 optimizations ONLY: function-body changes that do NOT alter the storage ` +
+        `layout or external interface — cache repeated SLOADs, hoist invariants and cache array ` +
+        `length out of loops, unchecked increments, ++i, constant/immutable for never-reassigned ` +
+        `values, public->external, calldata params, custom errors, drop redundant init/checks. ` +
+        `Do NOT repack structs, resize field types, or change any storage slot assignment.`;
+
   const prompt =
     `Use your solidity-gas-optimizer skill to optimize the Solidity contracts under src/. ` +
-    `Apply LEVEL 2 optimizations: you MAY redesign the internal storage layout — struct/slot ` +
-    `packing, smaller integer types, bitmaps, UDVTs — because this is a fresh new deployment ` +
-    `with no proxy. You must still preserve the EXTERNAL interface exactly (function signatures, ` +
-    `visibility-as-callable, events, and return shapes), but you do NOT need to preserve revert ` +
-    `reason strings (custom errors are encouraged). ` +
+    `${levelText} ` +
     `Write the optimized variants into the \`${outName}/\` directory, mirroring the original ` +
     `source layout (e.g. src/Foo.sol -> ${outName}/src/Foo.sol). Do NOT modify the original ` +
     `files in place. Verify with forge per the skill's verification gate, then write ` +
@@ -276,12 +284,13 @@ async function main() {
   const useAgent = Boolean(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN) || process.env.OPTLE_FORCE_AGENT === "1";
   const engine = useAgent ? "claude" : "mock";
   const model = process.env.OPTLE_MODEL || "claude-sonnet-4-6";
-  console.log(`[runner] engine=${engine}${useAgent ? ` model=${model}` : ""} files=${files.length} foundry=${Boolean(root)} out=${outName}`);
+  const level = process.env.OPTLE_LEVEL === "2" ? 2 : 1;
+  console.log(`[runner] engine=${engine}${useAgent ? ` model=${model} level=${level}` : ""} files=${files.length} foundry=${Boolean(root)} out=${outName}`);
 
   let changes = [];
   let agentMeta;
   if (useAgent) {
-    agentMeta = await runAgent(base, model, outName);
+    agentMeta = await runAgent(base, model, outName, level);
     changes = parseReportChanges(base);
   } else {
     for (const f of files) {

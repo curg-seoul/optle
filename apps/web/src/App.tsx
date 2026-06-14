@@ -100,6 +100,7 @@ export function App() {
   const { data: walletClient } = useWalletClient();
 
   const [file, setFile] = useState<File | null>(null);
+  const [level, setLevel] = useState<1 | 2>(1);
   const [phase, setPhase] = useState<Phase>("idle");
   const [upload, setUpload] = useState<UploadResult | null>(null);
   const [status, setStatus] = useState<JobStatus | null>(null);
@@ -120,13 +121,13 @@ export function App() {
       const res = await fetch("/sample.zip");
       if (!res.ok) throw new Error("sample not available");
       const blob = await res.blob();
-      await onPickFile(new File([blob], "staking-demo.zip", { type: "application/zip" }));
+      await onPickFile(new File([blob], "staking-demo.zip", { type: "application/zip" }), level);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }
 
-  const onPickFile = useCallback(async (f: File) => {
+  const onPickFile = useCallback(async (f: File, lvl: 1 | 2) => {
     if (!f.name.toLowerCase().endsWith(".zip")) {
       setError("Please upload a .zip of your Solidity project.");
       return;
@@ -135,7 +136,7 @@ export function App() {
     setFile(f);
     setPhase("uploading");
     try {
-      const result = await uploadProject(f);
+      const result = await uploadProject(f, lvl);
       setUpload(result);
       setPhase("ready");
     } catch (e) {
@@ -208,16 +209,38 @@ export function App() {
             <button className="ghost" onClick={loadSample} disabled={busy}>Load sample</button>
           </div>
 
+          <div className="level-select">
+            <span className="level-label">Optimization level</span>
+            <div className="level-opts">
+              <button
+                className={`level-opt${level === 1 ? " on" : ""}`}
+                onClick={() => setLevel(1)}
+                disabled={busy || phase !== "idle"}
+              >
+                <strong>Level 1</strong>
+                <span>function-body only · fast</span>
+              </button>
+              <button
+                className={`level-opt${level === 2 ? " on" : ""}`}
+                onClick={() => setLevel(2)}
+                disabled={busy || phase !== "idle"}
+              >
+                <strong>Level 2</strong>
+                <span>+ storage redesign · deeper, slower</span>
+              </button>
+            </div>
+          </div>
+
           <div
             className={`dropzone${dragOver ? " over" : ""}${file ? " has-file" : ""}`}
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) onPickFile(f); }}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) onPickFile(f, level); }}
             onClick={() => inputRef.current?.click()}
           >
             <input
               ref={inputRef} type="file" accept=".zip" hidden
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) onPickFile(f); }}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) onPickFile(f, level); }}
             />
             {file ? (
               <div className="dz-file">
@@ -237,7 +260,7 @@ export function App() {
           {upload && phase !== "idle" && (
             <div className="pay-confirm">
               <div className="pay-line">
-                <span className="pay-label">{upload.solFiles} .sol files · {(upload.totalBytes / 1024).toFixed(1)} KB · tier <b>{upload.tier}</b></span>
+                <span className="pay-label">{upload.solFiles} .sol files · {(upload.totalBytes / 1024).toFixed(1)} KB · tier <b>{upload.tier}</b> · Level <b>{upload.level}</b></span>
                 <span className="pay-amount">${upload.priceUsd.toFixed(2)}</span>
               </div>
               <div className="pay-actions">

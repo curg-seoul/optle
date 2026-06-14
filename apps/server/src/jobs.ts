@@ -41,6 +41,7 @@ export interface Job {
   status: JobStatus;
   stage: JobStage;
   sizing: ProjectSizing;
+  level: 1 | 2; // optimization depth (1 = function-body only, 2 = storage redesign)
   result?: RunnerResult;
   error?: string;
   paid: boolean;
@@ -55,8 +56,8 @@ function log(job: Job, line: string) {
   if (job.logs.length > MAX_LOGS) job.logs.splice(0, job.logs.length - MAX_LOGS);
 }
 
-export function createJob(id: string, sizing: ProjectSizing): Job {
-  const job: Job = { id, status: "pending", stage: "queued", sizing, paid: false, logs: [] };
+export function createJob(id: string, sizing: ProjectSizing, level: 1 | 2): Job {
+  const job: Job = { id, status: "pending", stage: "queued", sizing, level, paid: false, logs: [] };
   jobs.set(id, job);
   return job;
 }
@@ -71,7 +72,7 @@ const localInputZip = (id: string) => join(config.runner.jobsDir, id, "input.zip
 const localOutputZip = (id: string) => join(config.runner.jobsDir, id, "output.zip");
 
 /** Run `docker run` for the runner image, resolving on exit or rejecting on timeout. */
-function runContainer(id: string, tier: string, onLog: (line: string) => void): Promise<void> {
+function runContainer(id: string, tier: string, level: 1 | 2, onLog: (line: string) => void): Promise<void> {
   const r = config.runner;
   const name = `optle-${id}`;
   const aiKey = config.anthropicApiKey;
@@ -96,7 +97,7 @@ function runContainer(id: string, tier: string, onLog: (line: string) => void): 
     "--cpus", r.cpus,
     "--pids-limit", "256",
     "-v", `${hostWorkDir(id)}:/work`,
-    ...(useAgent ? [...authEnv, "-e", `OPTLE_MODEL=${model}`] : []),
+    ...(useAgent ? [...authEnv, "-e", `OPTLE_MODEL=${model}`, "-e", `OPTLE_LEVEL=${level}`] : []),
     r.image,
   ];
 
@@ -155,7 +156,7 @@ export async function runJob(id: string): Promise<void> {
 
     // 2) run the isolated optimizer (snapshot -> optimize -> verify loop)
     setStage("optimizing");
-    await runContainer(id, job.sizing.tier, (line) => log(job, line));
+    await runContainer(id, job.sizing.tier, job.level, (line) => log(job, line));
     setStage("verifying");
 
     // 3) read the runner's machine-readable result

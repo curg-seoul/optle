@@ -21,6 +21,7 @@ export interface UploadResult {
   priceUsd: number;
   solFiles: number;
   totalBytes: number;
+  level: 1 | 2;
 }
 
 export interface JobStatus {
@@ -59,9 +60,10 @@ async function asJson<T>(res: Response): Promise<T> {
 }
 
 /** Step 1: upload a project .zip; server stores it and returns the tier price. */
-export async function uploadProject(file: File): Promise<UploadResult> {
+export async function uploadProject(file: File, level: 1 | 2): Promise<UploadResult> {
   const form = new FormData();
   form.append("project", file);
+  form.append("level", String(level));
   const res = await fetch("/api/upload", { method: "POST", body: form });
   return asJson<UploadResult>(res);
 }

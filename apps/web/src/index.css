@@ -306,3 +306,22 @@ a.primary.download {
 .log .ll.agent { color: #cbd5e1; }
 .log .ll.stage { color: #7dd3fc; font-weight: 600; }
 .log .ll.err { color: #fca5a5; }
+
+/* --- optimization level selector --- */
+.level-select { margin: 10px 0 4px; }
+.level-label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 6px; }
+.level-opts { display: flex; gap: 8px; }
+.level-opt {
+  flex: 1;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #14171d;
+  color: var(--text);
+  cursor: pointer;
+}
+.level-opt:disabled { cursor: default; opacity: 0.6; }
+.level-opt.on { border-color: var(--accent); background: var(--accent-dim); }
+.level-opt strong { display: block; font-size: 13px; }
+.level-opt span { font-size: 11px; color: var(--muted); }
