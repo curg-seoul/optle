@@ -115,6 +115,11 @@ async function runAgent(base, model, outName) {
 
   const prompt =
     `Use your solidity-gas-optimizer skill to optimize the Solidity contracts under src/. ` +
+    `Apply LEVEL 2 optimizations: you MAY redesign the internal storage layout — struct/slot ` +
+    `packing, smaller integer types, bitmaps, UDVTs — because this is a fresh new deployment ` +
+    `with no proxy. You must still preserve the EXTERNAL interface exactly (function signatures, ` +
+    `visibility-as-callable, events, and return shapes), but you do NOT need to preserve revert ` +
+    `reason strings (custom errors are encouraged). ` +
     `Write the optimized variants into the \`${outName}/\` directory, mirroring the original ` +
     `source layout (e.g. src/Foo.sol -> ${outName}/src/Foo.sol). Do NOT modify the original ` +
     `files in place. Verify with forge per the skill's verification gate, then write ` +
@@ -262,9 +267,17 @@ async function main() {
   // Restore any in-place edits the agent may have made → src/ pristine.
   for (const [f, src] of originals) writeFileSync(f, src);
 
-  // Verify + measure: temporarily swap optimized files into the source tree.
+  // Measure the optimized gas. Preferred: the agent leaves a self-contained,
+  // runnable optimized/ project (its own foundry.toml + mirror tests), which
+  // handles layout changes (packing → getter types) and custom errors correctly.
   let verified = false, gasAfter = 0;
-  if (root && gasBefore > 0) {
+  if (existsSync(join(outAbs, "foundry.toml"))) {
+    const t = tryForge("forge test --gas-report", outAbs);
+    if (t.ok) { gasAfter = totalGas(t.out); verified = true; }
+  }
+  // Fallback (mock engine, or no optimized project): swap optimized files into
+  // the source tree, run the original tests, then restore.
+  if (!verified && root && gasBefore > 0) {
     const swapped = [];
     for (const f of files) {
       const opt = optimizedFor(base, outAbs, f);
