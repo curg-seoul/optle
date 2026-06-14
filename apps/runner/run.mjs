@@ -142,10 +142,10 @@ async function runAgent(base, model, outName) {
   })) {
     if (msg.type === "assistant") {
       for (const block of msg.message.content) {
-        if (block.type === "text" && block.text.trim()) console.log(`[agent] ${block.text.trim().slice(0, 300)}`);
+        if (block.type === "text" && block.text.trim()) console.log(`[agent] ${block.text.trim()}`);
         else if (block.type === "tool_use") {
           const arg = block.name === "Bash" ? block.input.command : (block.input.file_path ?? block.input.command ?? "");
-          console.log(`[agent] · ${block.name}: ${String(arg).slice(0, 120)}`);
+          console.log(`[agent] · ${block.name}: ${String(arg)}`);
         }
       }
     } else if (msg.type === "result") {

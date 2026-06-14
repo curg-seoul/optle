@@ -113,6 +113,19 @@ export function App() {
     setDownloadUrl(null); setError(null);
   }
 
+  // Load the bundled sample project (no manual upload) to demo the payment flow.
+  async function loadSample() {
+    setError(null);
+    try {
+      const res = await fetch("/sample.zip");
+      if (!res.ok) throw new Error("sample not available");
+      const blob = await res.blob();
+      await onPickFile(new File([blob], "staking-demo.zip", { type: "application/zip" }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   const onPickFile = useCallback(async (f: File) => {
     if (!f.name.toLowerCase().endsWith(".zip")) {
       setError("Please upload a .zip of your Solidity project.");
@@ -190,7 +203,10 @@ export function App() {
 
       <main>
         <section className="panel">
-          <div className="panel-head"><h2>Project</h2></div>
+          <div className="panel-head">
+            <h2>Project</h2>
+            <button className="ghost" onClick={loadSample} disabled={busy}>Load sample</button>
+          </div>
 
           <div
             className={`dropzone${dragOver ? " over" : ""}${file ? " has-file" : ""}`}

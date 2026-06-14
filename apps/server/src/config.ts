@@ -56,6 +56,10 @@ export const config = {
   // Isolated optimization runner (sibling Docker container per job).
   runner: {
     image: process.env.RUNNER_IMAGE ?? "optle-runner",
+    // "auto" (default): real Claude agent if a key/token is set, else mock.
+    // "mock": always run the offline mock optimizer (no AI cost) — use this on
+    // the public site; unset/auto for the real-AI demo recording.
+    engine: process.env.OPTLE_ENGINE ?? "auto",
     // Where the server keeps per-job working dirs (mounted into this container).
     jobsDir: process.env.JOBS_DIR ?? "/jobs",
     // The SAME directory's path on the Docker host, so `docker run -v` resolves

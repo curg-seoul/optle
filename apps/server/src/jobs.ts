@@ -82,7 +82,9 @@ function runContainer(id: string, tier: string, onLog: (line: string) => void): 
     : aiKey && aiKey !== "sk-ant-REPLACE_ME"
       ? ["-e", `ANTHROPIC_API_KEY=${aiKey}`]
       : [];
-  const useAgent = authEnv.length > 0;
+  // OPTLE_ENGINE=mock forces the offline mock optimizer even when keys are set
+  // (public site); "auto" uses the agent whenever a key/token is present.
+  const useAgent = config.runner.engine !== "mock" && authEnv.length > 0;
   // Larger projects get the stronger model.
   const model = process.env.CLAUDE_MODEL || (tier === "large" ? "claude-opus-4-8" : "claude-sonnet-4-6");
 

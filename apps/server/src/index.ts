@@ -121,7 +121,7 @@ app.get("/api/status/:jobId", (req, res) => {
     priceUsd: job.sizing.priceUsd,
     result: job.result,
     error: job.error,
-    logs: job.logs.slice(-200), // recent runner output for the live log panel
+    logs: job.logs.slice(-500), // recent runner output for the live log panel
   });
 });
 
