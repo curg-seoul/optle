@@ -97,6 +97,7 @@ function runContainer(id: string, tier: string, level: 1 | 2, onLog: (line: stri
     "--cpus", r.cpus,
     "--pids-limit", "256",
     "-v", `${hostWorkDir(id)}:/work`,
+    "-e", `OPTLE_VERIFY=${r.verify ? "on" : "off"}`,
     ...(useAgent ? [...authEnv, "-e", `OPTLE_MODEL=${model}`, "-e", `OPTLE_LEVEL=${level}`] : []),
     r.image,
   ];

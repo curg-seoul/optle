@@ -110,8 +110,9 @@ cd apps/web && npm install && npm run dev   # http://localhost:5173
 
 The dev server proxies `/api` to a backend (`DEV_API_TARGET`, default localhost).
 The backend address is never hardcoded — configure via env (`VITE_API_BASE` for
-the deployed frontend, `API_DOMAIN` for Caddy, `OPTLE_ENGINE` for mock vs Claude).
-Each app has a `.env.example`; full instructions in [DEPLOY.md](DEPLOY.md).
+the deployed frontend, `API_DOMAIN` for Caddy, `OPTLE_ENGINE` for mock vs Claude,
+`OPTLE_VERIFY=off` for a fast no-Foundry-loop pass). Each app has a `.env.example`;
+full instructions in [DEPLOY.md](DEPLOY.md).
 
 ## Tech
 

@@ -106,7 +106,7 @@ function optimizeSource(code) {
 }
 
 /** Real engine: run the Claude Agent SDK with the skill loaded natively. */
-async function runAgent(base, model, outName, level) {
+async function runAgent(base, model, outName, level, verify) {
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
 
   // Make the skill discoverable as a project skill (references resolve relative).
@@ -130,13 +130,18 @@ async function runAgent(base, model, outName, level) {
         `values, public->external, calldata params, custom errors, drop redundant init/checks. ` +
         `Do NOT repack structs, resize field types, or change any storage slot assignment.`;
 
+  const verifyText = verify
+    ? `Verify with forge per the skill's verification gate (tests must pass and gas must drop), `
+    : `Do NOT run the skill's verification gate — SKIP \`forge test\` and fuzzing entirely (a ` +
+      `single \`forge build\` to confirm it compiles is fine, nothing more). Apply the transforms ` +
+      `from the pattern corpus directly and be fast, `;
+
   const prompt =
     `Use your solidity-gas-optimizer skill to optimize the Solidity contracts under src/. ` +
     `${levelText} ` +
     `Write the optimized variants into the \`${outName}/\` directory, mirroring the original ` +
     `source layout (e.g. src/Foo.sol -> ${outName}/src/Foo.sol). Do NOT modify the original ` +
-    `files in place. Verify with forge per the skill's verification gate, then write ` +
-    `OPTIMIZATION_REPORT.md at the project root.`;
+    `files in place. ${verifyText}then write OPTIMIZATION_REPORT.md at the project root.`;
 
   let cost = 0, turns = 0;
   for await (const msg of query({
@@ -275,9 +280,13 @@ async function main() {
   // Snapshot originals so src/ is always restored pristine.
   const originals = new Map(files.map((f) => [f, readFileSync(f, "utf8")]));
 
-  // Baseline gas on the originals.
+  // OPTLE_VERIFY=off → fast mode: apply optimizations only, skip the forge
+  // test/fuzz loop (no verified before/after gas).
+  const verifyMode = process.env.OPTLE_VERIFY !== "off";
+
+  // Baseline gas on the originals (skipped in fast mode).
   let gasBefore = 0;
-  if (root && tryForge("forge build", root).ok) {
+  if (verifyMode && root && tryForge("forge build", root).ok) {
     const report = tryForge("forge test --gas-report", root);
     if (report.ok) gasBefore = totalGas(report.out);
   }
@@ -290,12 +299,12 @@ async function main() {
   const engine = useAgent ? "claude" : "mock";
   const model = process.env.OPTLE_MODEL || "claude-sonnet-4-6";
   const level = process.env.OPTLE_LEVEL === "2" ? 2 : 1;
-  console.log(`[runner] engine=${engine}${useAgent ? ` model=${model} level=${level}` : ""} files=${files.length} foundry=${Boolean(root)} out=${outName}`);
+  console.log(`[runner] engine=${engine}${useAgent ? ` model=${model} level=${level}` : ""} verify=${verifyMode} files=${files.length} foundry=${Boolean(root)} out=${outName}`);
 
   let changes = [];
   let agentMeta;
   if (useAgent) {
-    agentMeta = await runAgent(base, model, outName, level);
+    agentMeta = await runAgent(base, model, outName, level, verifyMode);
     changes = parseReportChanges(base);
   } else {
     for (const f of files) {
@@ -310,17 +319,18 @@ async function main() {
   // Restore any in-place edits the agent may have made → src/ pristine.
   for (const [f, src] of originals) writeFileSync(f, src);
 
-  // Measure the optimized gas. Preferred: the agent leaves a self-contained,
-  // runnable optimized/ project (its own foundry.toml + mirror tests), which
-  // handles layout changes (packing → getter types) and custom errors correctly.
+  // Measure the optimized gas (skipped entirely in fast mode). Preferred: the
+  // agent leaves a self-contained, runnable optimized/ project (its own
+  // foundry.toml + mirror tests), which handles layout changes (packing → getter
+  // types) and custom errors correctly.
   let verified = false, gasAfter = 0;
-  if (existsSync(join(outAbs, "foundry.toml"))) {
+  if (verifyMode && existsSync(join(outAbs, "foundry.toml"))) {
     const t = tryForge("forge test --gas-report", outAbs);
     if (t.ok) { gasAfter = totalGas(t.out); verified = true; }
   }
   // Fallback (mock engine, or no optimized project): swap optimized files into
   // the source tree, run the original tests, then restore.
-  if (!verified && root && gasBefore > 0) {
+  if (verifyMode && !verified && root && gasBefore > 0) {
     const swapped = [];
     for (const f of files) {
       const opt = optimizedFor(base, outAbs, f);
@@ -341,9 +351,12 @@ async function main() {
     savedPct = Number((Math.min(0.35, applied * 0.02) * 100).toFixed(1));
   }
 
+  const by = engine === "claude" ? "Claude" : "the mock pass";
   const message = verified
-    ? `Optimized with ${engine === "claude" ? "Claude" : "the mock pass"} into ${outName}/ and verified with Foundry tests.`
-    : `Optimized with ${engine === "claude" ? "Claude" : "the mock pass"} into ${outName}/; Foundry verification unavailable.`;
+    ? `Optimized with ${by} into ${outName}/ and verified with Foundry tests.`
+    : !verifyMode
+      ? `Optimized with ${by} into ${outName}/ (fast mode — Foundry verification skipped).`
+      : `Optimized with ${by} into ${outName}/; Foundry verification unavailable.`;
 
   const diffs = buildDiffs(base, outAbs, files);
 
