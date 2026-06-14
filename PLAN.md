@@ -24,9 +24,10 @@
 - ✅ **x402 서버 (`apps/server/`)** — Mantle Sepolia 결제 게이트(자체 x402 구현).
   미결제 → 402 로컬 검증, `PAYMENT_MODE=bypass`로 facilitator 없이 데모 가능.
 
-> 참고: 아래 §2~§9의 "디렉토리 업로드(tar.gz) + COS + 비동기 잡" 플로우는 **최종 목표**다.
-> 현재는 단순화를 위해 **단일 컨트랙트 코드 입력**부터 구현 중이며, 디렉토리/COS 플로우는
-> 후속 단계로 둔다.
+> **v2 (진행 중) — §11 참조.** 단일 컨트랙트 문자열 입력에서 **.zip 프로젝트 업로드 →
+> COS 저장 → 격리 docker 컨테이너에서 최적화 루프 → .zip 다운로드(presigned)**로 확장한다.
+> 가격은 프로젝트 크기에 따라 3-tier로 동적 책정. 최적화 엔진은 **mock-first**(파이프라인을
+> 먼저 완성하고 Claude Agent SDK는 seam만 남겨 교체). 구체 설계·결정·Tencent 작업은 §11.
 
 ### 로컬 실행 (결제 없이 데모)
 ```bash
@@ -296,3 +297,83 @@ CLAUDE_MODEL=claude-sonnet-4-6
 - Hardhat 등 비-foundry 빌드시스템 검증
 - 영속 DB (잡 상태는 in-memory, 파일은 COS로 충분)
 - 결제 환불/재시도 로직
+
+---
+
+## 11. v2 — 프로젝트 업로드 + 격리 실행 + 동적 가격 (진행 중)
+
+§2~§9의 최종 목표를 실제 구현한다. 단일 컨트랙트 문자열 → **.zip 프로젝트 업로드 → COS →
+격리 docker 컨테이너에서 최적화/검증 루프 → .zip 다운로드**. 포맷은 tar.gz가 아니라 **.zip**.
+
+### 11.1 플로우
+
+```
+[브라우저]                 [server (CVM, compose)]                 [runner 컨테이너]
+  | 1. .zip 드래그앤드롭                                                   |
+  |---- POST /upload (multipart) ----->| COS PUT jobs/<id>/input.zip       |
+  |                                     | .zip 펼쳐 .sol 분석 → tier·가격   |
+  |<--- { jobId, tier, priceUsd } ------|   in-memory job 생성              |
+  |                                     |                                   |
+  | 2. POST /optimize/:jobId            |                                   |
+  |<--- 402 (가격 = job.priceUsd) ------| (동적 가격 x402 게이트)           |
+  | 3. EIP-3009 서명 후 재요청          | facilitator verify/settle         |
+  |---- X-PAYMENT --------------------->| 결제 OK → 잡 enqueue, 즉시 응답   |
+  |                                     | COS GET input.zip → /jobs/<id>/work
+  |                                     | docker run --network none ------->| 4. gas snapshot
+  |  (폴링) GET /status/:jobId          |   -v <host>/<id>/work:/work       |    → optimize(mock)
+  |<--- { status, stage, savedPct? } ---|   optle-runner                    |    → forge 검증
+  |                                     | 종료코드/리포트 수거              |    → re-measure
+  |                                     | /work → output.zip → COS PUT      |<---|  → REPORT.md
+  | 5. GET /download/:jobId             |                                   |
+  |<--- { url: presigned GET } ---------| COS presigned (1h)                |
+```
+
+### 11.2 v2 결정사항
+
+| 항목 | 결정 | 근거 |
+|------|------|------|
+| 업로드 포맷 | **.zip 전용** (드래그앤드롭, Netlify-drop류 UX) | 폴더 업로드보다 단순·호환. 사용자 승인. |
+| 업로드 경로 | **서버 경유** (브라우저→server→COS) | Netlify same-origin 프록시 그대로 활용 → COS CORS 불필요. 업로드 즉시 서버가 .sol 분석해 가격 산정. |
+| 다운로드 경로 | **COS presigned GET URL** (1h) | 큰 결과물을 서버 안 거치고 브라우저가 직접 다운로드. 앵커 네비게이션이라 CORS 불필요. |
+| 스토리지 | **Tencent COS, region `ap-singapore`** | CVM과 동일 리전(레이턴시·egress). `jobs/<id>/input.zip`, `jobs/<id>/output.zip`. |
+| 격리 실행 | **server가 docker 소켓으로 형제 runner 컨테이너 spawn** | 업로드된 미신뢰 코드를 호스트가 아닌 일회용 컨테이너에서 실행. `--rm --network none --memory/--cpus/--pids` 제한 + 타임아웃. server 이미지에 docker CLI. |
+| 컨테이너 I/O | **호스트 바인드 디렉토리 공유** (`HOST_JOBS_DIR`) | server(컨테이너)가 `docker run -v ${HOST_JOBS_DIR}/<id>/work:/work` 하려면 호스트 경로가 필요 → compose에서 동일 호스트 경로를 server에 `/jobs`로 마운트하고 `HOST_JOBS_DIR` env로 매핑. runner는 오프라인(`--network none`)으로 COS 접근 불필요(I/O는 server가 담당). |
+| 가격 책정 | **3-tier 동적, `max(.sol 파일수, .sol 총 바이트)` 기준** | 업로드 시 .zip 내 `*.sol`(test/script/lib 제외) 수와 합산 용량으로 tier 결정 → 402 챌린지에 반영. |
+| 최적화 엔진 | **mock-first** (regex 변환 + 선택적 forge 스냅샷) | PLAN 원칙(개발 중 AI 비용 0) 유지. 엔진 함수가 seam → 나중에 Claude Agent SDK로 교체. |
+| 잡 상태 | **in-memory Map + stage 필드** | `pending→running(queued/downloading/optimizing/verifying/packaging)→done|error`. 폴링. 재시작 시 휘발(데모 OK). |
+
+### 11.3 가격 tier
+
+업로드된 .zip에서 `test/`·`script/`·`lib/` 밖의 `*.sol`만 집계. **파일수·용량 중 더 높은 tier** 적용.
+
+| Tier | 조건 | 가격(USD) |
+|------|------|----------|
+| Small | ≤ 3 files **AND** ≤ 30 KB | $0.50 |
+| Medium | ≤ 20 files **AND** ≤ 200 KB | $3.00 |
+| Large | 그 이상 (DeFi급) | $10.00 |
+
+> 서버 `PAYMENT_PRICE`(고정값)는 더 이상 결제액을 직접 결정하지 않고, tier 가격이 jobId별로
+> x402 게이트에 주입된다. USDC 6 decimals로 base units 환산.
+
+### 11.4 컴포넌트 (v2 추가)
+
+```
+apps/
+├── server/src/
+│   ├── cos.ts          # COS 클라이언트 (put/get/presigned) — cos-nodejs-sdk-v5
+│   ├── pricing.ts      # .zip → .sol 분석 → tier·priceUsd·amountBaseUnits
+│   ├── jobs.ts         # in-memory 잡 스토어 + runner 컨테이너 오케스트레이션
+│   └── index.ts        # /upload, /optimize/:jobId(게이트), /status, /download
+├── runner/             # 격리 실행 이미지 (foundry + node + skill + entrypoint)
+│   ├── Dockerfile
+│   └── run.mjs         # /work에서 snapshot→optimize(mock)→forge 검증→REPORT.md
+└── web/src/            # .zip 드래그앤드롭 + 업로드→결제→폴링→다운로드 UX
+```
+
+### 11.5 ⚠️ Tencent Cloud에서 직접 해야 할 것
+
+1. **COS 버킷 생성** — region `ap-singapore`(CVM과 동일). 버킷명 예: `optle-jobs-12500xxxxx`.
+2. **API 키 발급** — 콘솔 → 访问管理(CAM) → API 키. `SecretId`/`SecretKey` 확보(데모용 메인 키 OK).
+   → CVM의 `apps/server/.env`에 `COS_*`로 넣음. CORS 설정은 **불필요**(업로드 서버경유, 다운로드 네비게이션).
+3. (CVM) compose에 호스트 잡 디렉토리(`/srv/optle-jobs`)와 docker 소켓 마운트 추가 — 코드로 제공.
+
