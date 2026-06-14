@@ -1,0 +1,9 @@
+{
+  "name": "optle-runner",
+  "private": true,
+  "type": "module",
+  "description": "Isolated gas-optimization runner. Operates on a mounted /work dir.",
+  "scripts": {
+    "start": "node run.mjs"
+  }
+}
