@@ -47,7 +47,12 @@ CORS needed — uploads go through the server, downloads use a presigned GET.
 New site from the repo (`apps/web/netlify.toml` sets the base/build/publish). In
 Site settings → Environment variables set `VITE_API_BASE` to your backend URL
 (e.g. `https://api.yourdomain`) — the app calls it directly. Optionally set
-`VITE_WALLETCONNECT_PROJECT_ID`. Add your custom domain.
+`VITE_USDC_ADDRESS` (header balance) and `VITE_WALLETCONNECT_PROJECT_ID`. Add your
+custom domain.
+
+For a manual CLI deploy, these must be set **at build time** — put them in
+`apps/web/.env.production` (gitignored) or pass inline, then:
+`npm run build && npx netlify-cli deploy --prod --dir=dist`.
 
 ## Operations
 
