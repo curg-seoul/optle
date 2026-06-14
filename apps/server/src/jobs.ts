@@ -68,7 +68,14 @@ function runContainer(id: string, tier: string): Promise<void> {
   const r = config.runner;
   const name = `optle-${id}`;
   const aiKey = config.anthropicApiKey;
-  const useAgent = Boolean(aiKey && aiKey !== "sk-ant-REPLACE_ME");
+  const oauthToken = config.oauthToken;
+  // Prefer subscription token (no API credits) when present; else the API key.
+  const authEnv = oauthToken
+    ? ["-e", `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`]
+    : aiKey && aiKey !== "sk-ant-REPLACE_ME"
+      ? ["-e", `ANTHROPIC_API_KEY=${aiKey}`]
+      : [];
+  const useAgent = authEnv.length > 0;
   // Larger projects get the stronger model.
   const model = process.env.CLAUDE_MODEL || (tier === "large" ? "claude-opus-4-8" : "claude-sonnet-4-6");
 
@@ -80,7 +87,7 @@ function runContainer(id: string, tier: string): Promise<void> {
     "--cpus", r.cpus,
     "--pids-limit", "256",
     "-v", `${hostWorkDir(id)}:/work`,
-    ...(useAgent ? ["-e", `ANTHROPIC_API_KEY=${aiKey}`, "-e", `OPTLE_MODEL=${model}`] : []),
+    ...(useAgent ? [...authEnv, "-e", `OPTLE_MODEL=${model}`] : []),
     r.image,
   ];
 

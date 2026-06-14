@@ -218,7 +218,9 @@ async function main() {
     if (report.ok) gasBefore = totalGas(report.out);
   }
 
-  const useAgent = Boolean(process.env.ANTHROPIC_API_KEY) || process.env.OPTLE_FORCE_AGENT === "1";
+  const useAgent =
+    Boolean(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN) ||
+    process.env.OPTLE_FORCE_AGENT === "1";
   const engine = useAgent ? "claude" : "mock";
   const model = process.env.OPTLE_MODEL || "claude-sonnet-4-6";
   console.log(`[runner] engine=${engine}${useAgent ? ` model=${model}` : ""} files=${files.length} foundry=${Boolean(root)}`);

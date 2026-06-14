@@ -69,5 +69,8 @@ export const config = {
 
   // AI — read only after deploy; dev uses the mock (no API calls).
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+  // Subscription auth alternative to a (credit-billed) API key — generate with
+  // `claude setup-token`. If set, the runner uses it instead of the API key.
+  oauthToken: process.env.CLAUDE_CODE_OAUTH_TOKEN,
   model: process.env.CLAUDE_MODEL ?? "claude-opus-4-8",
 };
