@@ -44,12 +44,19 @@ export interface Job {
   result?: RunnerResult;
   error?: string;
   paid: boolean;
+  logs: string[]; // live runner output (capped ring buffer)
 }
 
 const jobs = new Map<string, Job>();
+const MAX_LOGS = 1000;
+
+function log(job: Job, line: string) {
+  job.logs.push(line);
+  if (job.logs.length > MAX_LOGS) job.logs.splice(0, job.logs.length - MAX_LOGS);
+}
 
 export function createJob(id: string, sizing: ProjectSizing): Job {
-  const job: Job = { id, status: "pending", stage: "queued", sizing, paid: false };
+  const job: Job = { id, status: "pending", stage: "queued", sizing, paid: false, logs: [] };
   jobs.set(id, job);
   return job;
 }
@@ -64,7 +71,7 @@ const localInputZip = (id: string) => join(config.runner.jobsDir, id, "input.zip
 const localOutputZip = (id: string) => join(config.runner.jobsDir, id, "output.zip");
 
 /** Run `docker run` for the runner image, resolving on exit or rejecting on timeout. */
-function runContainer(id: string, tier: string): Promise<void> {
+function runContainer(id: string, tier: string, onLog: (line: string) => void): Promise<void> {
   const r = config.runner;
   const name = `optle-${id}`;
   const aiKey = config.anthropicApiKey;
@@ -94,11 +101,23 @@ function runContainer(id: string, tier: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });
     let stderr = "";
-    child.stdout.on("data", (d) => console.log(`[runner ${id}] ${d}`.trimEnd()));
-    child.stderr.on("data", (d) => {
-      stderr += d;
-      console.error(`[runner ${id}] ${d}`.trimEnd());
-    });
+    // Split stream chunks into whole lines and forward each to onLog + console.
+    const lineSplitter = (prefix: string) => {
+      let buf = "";
+      return (d: Buffer) => {
+        buf += d.toString();
+        const parts = buf.split("\n");
+        buf = parts.pop() ?? "";
+        for (const line of parts) {
+          if (!line.trim()) continue;
+          console.log(`[runner ${id}] ${line}`);
+          onLog(prefix + line);
+        }
+      };
+    };
+    const onStderr = lineSplitter("");
+    child.stdout.on("data", lineSplitter(""));
+    child.stderr.on("data", (d) => { stderr += d.toString(); onStderr(d); });
 
     const timer = setTimeout(() => {
       spawn("docker", ["kill", name]); // best-effort
@@ -123,18 +142,19 @@ export async function runJob(id: string): Promise<void> {
   if (!job) return;
   job.status = "running";
   const jobRoot = join(config.runner.jobsDir, id);
+  const setStage = (s: JobStage) => { job.stage = s; log(job, `── ${s} ──`); };
 
   try {
     // 1) fetch + unzip input
-    job.stage = "downloading";
+    setStage("downloading");
     mkdirSync(workDir(id), { recursive: true });
     await getToFile(inputKey(id), localInputZip(id));
     new AdmZip(localInputZip(id)).extractAllTo(workDir(id), /* overwrite */ true);
 
     // 2) run the isolated optimizer (snapshot -> optimize -> verify loop)
-    job.stage = "optimizing";
-    await runContainer(id, job.sizing.tier);
-    job.stage = "verifying";
+    setStage("optimizing");
+    await runContainer(id, job.sizing.tier, (line) => log(job, line));
+    setStage("verifying");
 
     // 3) read the runner's machine-readable result
     const resultPath = join(workDir(id), "OPTLE_RESULT.json");
@@ -144,18 +164,19 @@ export async function runJob(id: string): Promise<void> {
     }
 
     // 4) package work dir -> output.zip -> COS (skip build artifacts / vcs / deps)
-    job.stage = "packaging";
+    setStage("packaging");
     const outZip = new AdmZip();
     const SKIP = /(^|\/)(out|cache|broadcast|node_modules|\.git|\.claude)(\/|$)/;
     outZip.addLocalFolder(workDir(id), undefined, (entry) => !SKIP.test(entry));
     outZip.writeZip(localOutputZip(id));
     await putFile(outputKey(id), localOutputZip(id));
 
-    job.stage = "complete";
+    setStage("complete");
     job.status = "done";
   } catch (err) {
     job.status = "error";
     job.error = err instanceof Error ? err.message : String(err);
+    log(job, `✗ error: ${job.error}`);
     console.error(`[job ${id}] failed:`, job.error);
   } finally {
     // Clean the working dir; input/output persist in COS.

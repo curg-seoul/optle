@@ -34,6 +34,28 @@ function UsdcBalance() {
   return <span className="usdc-balance">{text} USDC</span>;
 }
 
+function LogPanel({ logs }: { logs?: string[] }) {
+  const ref = useRef<HTMLPreElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [logs]);
+  if (!logs || logs.length === 0) return null;
+  return (
+    <details className="logbox" open>
+      <summary>Runner logs ({logs.length})</summary>
+      <pre className="log" ref={ref}>
+        {logs.map((l, i) => {
+          let cls = "";
+          if (l.startsWith("──")) cls = "stage";
+          else if (l.startsWith("✗") || l.startsWith("[agent-stderr]")) cls = "err";
+          else if (l.startsWith("[agent]")) cls = "agent";
+          return <div key={i} className={`ll ${cls}`}>{l}</div>;
+        })}
+      </pre>
+    </details>
+  );
+}
+
 function DiffView({ diffs }: { diffs?: { file: string; diff: string }[] }) {
   if (!diffs || diffs.length === 0) return null;
   return (
@@ -239,6 +261,8 @@ export function App() {
               </ol>
 
               {phase === "running" && <p className="muted">Working… ({STAGE_LABEL[status?.stage ?? "queued"]})</p>}
+
+              <LogPanel logs={status?.logs} />
 
               {phase === "done" && result && (
                 <>

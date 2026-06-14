@@ -31,6 +31,7 @@ export interface JobStatus {
   priceUsd: number;
   result?: RunnerResult;
   error?: string;
+  logs?: string[];
 }
 
 export interface PaymentRequirements {
