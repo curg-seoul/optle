@@ -59,7 +59,12 @@ function sourceSolFiles(base) {
 
 function tryForge(cmd, cwd) {
   try {
-    return { ok: true, out: execSync(cmd, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) };
+    // Bound each forge call so a stuck process (e.g. a runtime solc download)
+    // fails fast instead of hanging until the container-level timeout.
+    return {
+      ok: true,
+      out: execSync(cmd, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 240000 }),
+    };
   } catch (e) {
     return { ok: false, out: `${e.stdout ?? ""}${e.stderr ?? ""}` };
   }
