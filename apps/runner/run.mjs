@@ -134,6 +134,8 @@ async function runAgent(base, model) {
       allowDangerouslySkipPermissions: true,
       allowedTools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
       systemPrompt: { type: "preset", preset: "claude_code", append: skill },
+      // Surface the underlying CLI subprocess errors in our logs.
+      stderr: (data) => console.error(`[agent-stderr] ${String(data).trimEnd()}`),
     },
   })) {
     if (msg.type === "assistant") {

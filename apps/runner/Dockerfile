@@ -8,6 +8,9 @@ RUN apt-get update \
 
 # Install Foundry (forge/cast/anvil).
 ENV PATH="/root/.foundry/bin:${PATH}"
+# The container runs as root; tell Claude Code it's a sandbox so the agent's
+# --dangerously-skip-permissions is allowed (it refuses as root otherwise).
+ENV IS_SANDBOX=1
 RUN curl -L https://foundry.paradigm.xyz | bash && foundryup
 
 # Build context is the repo root (so we can also pull in the skill file).
