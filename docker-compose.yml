@@ -1,14 +1,14 @@
-# Production stack for the x402 gas-optimizer backend (Tencent Cloud CVM).
-# Frontend is hosted separately on Netlify (optle.hanjun.kim) and proxies
-# /api + /health here via netlify.toml.
+# Production stack for the Optle backend. The frontend is hosted separately
+# (Netlify) and calls this backend via VITE_API_BASE.
 #
-#   Caddy (auto-HTTPS for api.optle.hanjun.kim)  -> server:8080
-#                                                     -> facilitator:8090 (internal only)
+#   Caddy (auto-HTTPS for $API_DOMAIN)  -> server:8080
+#                                          -> facilitator:8090 (internal only)
 #
 # Only Caddy publishes ports (80/443). server + facilitator stay on the internal
 # compose network and are never exposed to the internet.
 #
-# Secrets come from each app's .env (copy them onto the CVM before `up`).
+# Set API_DOMAIN in the host env / a root .env. Secrets come from each app's .env
+# (copy them onto the VM before `up`).
 services:
   server:
     build: ./apps/server
@@ -55,6 +55,9 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    environment:
+      # Caddyfile uses {$API_DOMAIN}; set API_DOMAIN in the host env or a root .env.
+      - API_DOMAIN=${API_DOMAIN:?set API_DOMAIN (e.g. in a root .env)}
     ports:
       - "80:80"
       - "443:443"

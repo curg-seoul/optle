@@ -51,6 +51,11 @@ function randomNonce(): `0x${string}` {
     Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")) as `0x${string}`;
 }
 
+// Backend base URL. Empty (default) = same-origin relative paths, which the dev
+// server proxies (see vite.config.ts). In production set VITE_API_BASE to the
+// deployed backend URL (cross-origin; the server allows CORS + the X-PAYMENT header).
+const API = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
+
 async function asJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
@@ -64,7 +69,7 @@ export async function uploadProject(file: File, level: 1 | 2): Promise<UploadRes
   const form = new FormData();
   form.append("project", file);
   form.append("level", String(level));
-  const res = await fetch("/api/upload", { method: "POST", body: form });
+  const res = await fetch(`${API}/api/upload`, { method: "POST", body: form });
   return asJson<UploadResult>(res);
 }
 
@@ -75,7 +80,7 @@ export async function uploadProject(file: File, level: 1 | 2): Promise<UploadRes
 export async function requestPayment(
   jobId: string,
 ): Promise<{ kind: "running" } | { kind: "challenge"; requirements: PaymentRequirements }> {
-  const res = await fetch(`/api/optimize/${jobId}`, { method: "POST" });
+  const res = await fetch(`${API}/api/optimize/${jobId}`, { method: "POST" });
   if (res.status !== 402) {
     await asJson(res); // throws on non-2xx
     return { kind: "running" };
@@ -147,7 +152,7 @@ export async function payForJob(
   };
   const xPayment = btoa(JSON.stringify(paymentPayload));
 
-  const res = await fetch(`/api/optimize/${jobId}`, {
+  const res = await fetch(`${API}/api/optimize/${jobId}`, {
     method: "POST",
     headers: { "X-PAYMENT": xPayment },
   });
@@ -156,11 +161,11 @@ export async function payForJob(
 
 /** Step 3: poll job status. */
 export async function getStatus(jobId: string): Promise<JobStatus> {
-  return asJson<JobStatus>(await fetch(`/api/status/${jobId}`));
+  return asJson<JobStatus>(await fetch(`${API}/api/status/${jobId}`));
 }
 
 /** Step 4: get a presigned URL for the optimized result zip. */
 export async function getDownloadUrl(jobId: string): Promise<string> {
-  const { url } = await asJson<{ url: string }>(await fetch(`/api/download/${jobId}`));
+  const { url } = await asJson<{ url: string }>(await fetch(`${API}/api/download/${jobId}`));
   return url;
 }

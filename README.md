@@ -77,16 +77,23 @@ examples/          staking-demo — an intentionally inefficient project for dem
 
 ## Local development
 
-The frontend dev server proxies the API to the deployed backend by default, so
-the UI runs without anything else:
-
 ```bash
 cd apps/web && npm install && npm run dev   # http://localhost:5173
 ```
 
-Set `DEV_API_TARGET=http://localhost:8080` to develop against a local backend.
-Each app has a `.env.example` — copy to `.env` and fill in. Deployment is in
-[DEPLOY.md](DEPLOY.md).
+The dev server proxies `/api` to a local backend (`http://localhost:8080`) by
+default; set `DEV_API_TARGET` to point it at a remote backend instead. Each app
+has a `.env.example` — copy to `.env` and fill in.
+
+The server address is **not hardcoded anywhere** — configure it via env:
+
+| Var | Where | Purpose |
+|---|---|---|
+| `VITE_API_BASE` | frontend build (Netlify) | backend URL the deployed app calls |
+| `DEV_API_TARGET` | `apps/web` dev | backend the dev server proxies to |
+| `API_DOMAIN` | backend host / compose | domain Caddy serves + gets a cert for |
+
+Deployment details are in [DEPLOY.md](DEPLOY.md).
 
 ## Tech
 

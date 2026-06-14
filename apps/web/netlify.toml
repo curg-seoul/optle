@@ -1,31 +1,19 @@
-# Netlify config for the frontend (custom domain: optle.hanjun.kim).
+# Netlify config for the frontend.
 #
-# The browser calls /api and /health as same-origin relative paths. These proxy
-# rewrites forward them server-side to the Tencent Cloud backend, so there is no
-# CORS preflight and the custom X-PAYMENT header works unchanged.
+# Set these in the Netlify UI (Site settings → Environment variables) — they are
+# build-time vars, kept out of the repo:
+#   VITE_API_BASE                 the deployed backend URL, e.g. https://api.yourdomain
+#   VITE_WALLETCONNECT_PROJECT_ID (optional) WalletConnect / mobile-wallet QR
 #
-# Set VITE_WALLETCONNECT_PROJECT_ID in the Netlify UI (Site settings → Env vars)
-# if you want WalletConnect / mobile-wallet QR in the RainbowKit modal.
+# The frontend calls VITE_API_BASE directly (cross-origin; the backend allows CORS
+# and the X-PAYMENT header), so no API proxy rewrite is needed here.
 
 [build]
   base = "apps/web"
   command = "npm run build"
   publish = "dist"
 
-# API proxy → backend (must come before the SPA fallback).
-[[redirects]]
-  from = "/api/*"
-  to = "https://api.optle.hanjun.kim/api/:splat"
-  status = 200
-  force = true
-
-[[redirects]]
-  from = "/health"
-  to = "https://api.optle.hanjun.kim/health"
-  status = 200
-  force = true
-
-# SPA fallback: serve index.html for client-side routes.
+# SPA fallback: serve index.html for client-side routes (e.g. /app).
 [[redirects]]
   from = "/*"
   to = "/index.html"

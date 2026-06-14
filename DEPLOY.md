@@ -26,26 +26,29 @@ CORS needed — uploads go through the server, downloads use a presigned GET.
 1. VM: Ubuntu 22.04, 2 vCPU / 2–4 GB. Open inbound `22` (your IP), `80`, `443`
    only — `8080`/`8090` stay internal to the compose network.
 2. Install Docker: `curl -fsSL https://get.docker.com | sh`
-3. Point an A record `api.example.com` → VM public IP (Caddy needs it for a cert).
+3. Point an A record for your API domain → VM public IP (Caddy needs it for a cert).
 4. Clone the repo and create the env files from the templates (gitignored):
    - `apps/server/.env` — `PAY_TO_ADDRESS`, `PAYMENT_ASSET_*`, `COS_*`, and
      `OPTLE_ENGINE` (`mock` for a public site, `auto` + a Claude key for real runs).
    - `apps/facilitator/.env` — `RELAYER_PRIVATE_KEY` (funded with testnet gas),
      `RPC_URL`, `CHAIN_ID`.
+   - root `.env` (next to `docker-compose.yml`) — `API_DOMAIN=api.yourdomain` (the
+     domain Caddy serves and gets a cert for).
 5. Prepare the job dir, build the runner image, and launch:
    ```bash
    sudo mkdir -p /srv/optle-jobs && sudo chmod 777 /srv/optle-jobs
    docker compose --profile build build runner   # builds the optle-runner image
    docker compose up -d --build
    ```
-6. Verify: `curl https://api.example.com/health` → `{"ok":true,...,"cos":true}`
+6. Verify: `curl https://<API_DOMAIN>/health` → `{"ok":true,...,"cos":true}`
    (`"cos":false` means `COS_*` is missing).
 
 ## 3. Frontend (Netlify)
 
-New site from the repo — `apps/web/netlify.toml` sets the base, build, publish dir,
-and proxies `/api` + `/health` to the backend (edit the target to your API
-domain). Add your custom domain; optionally set `VITE_WALLETCONNECT_PROJECT_ID`.
+New site from the repo (`apps/web/netlify.toml` sets the base/build/publish). In
+Site settings → Environment variables set `VITE_API_BASE` to your backend URL
+(e.g. `https://api.yourdomain`) — the app calls it directly. Optionally set
+`VITE_WALLETCONNECT_PROJECT_ID`. Add your custom domain.
 
 ## Operations
 

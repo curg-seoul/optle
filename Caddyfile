@@ -1,5 +1,6 @@
-# Caddy auto-provisions a Let's Encrypt cert for this domain (point an A record
-# at the CVM's public IP first). Reverse-proxies to the server container.
-api.optle.hanjun.kim {
+# Domain comes from the API_DOMAIN env var (set in the host environment / root
+# .env; docker-compose passes it to the caddy container). Point an A record at the
+# VM's public IP first — Caddy auto-provisions a Let's Encrypt cert for it.
+{$API_DOMAIN} {
 	reverse_proxy server:8080
 }
