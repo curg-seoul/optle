@@ -11,6 +11,7 @@ export interface RunnerResult {
   savedPct?: number;
   costUsd?: number;
   changes?: { rule: string; kind: string; description: string; count: number }[];
+  diffs?: { file: string; diff: string }[];
   message?: string;
 }
 

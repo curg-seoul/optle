@@ -182,6 +182,35 @@ function writeResult(result) {
   writeFileSync(join(WORK, "OPTLE_RESULT.json"), JSON.stringify(result, null, 2));
 }
 
+/** GitHub-style unified diff (only changed hunks) between original and optimized. */
+function unifiedDiff(originalPath, optimizedPath) {
+  let raw = "";
+  try {
+    raw = execSync(`git diff --no-index --no-color -- "${originalPath}" "${optimizedPath}"`, {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch (e) {
+    raw = e.stdout ?? ""; // git exits 1 when the files differ
+  }
+  const at = raw.indexOf("\n@@");
+  const body = at >= 0 ? raw.slice(at + 1) : "";
+  // Cap very large diffs so the status payload stays reasonable.
+  const lines = body.split("\n");
+  return lines.length > 600 ? lines.slice(0, 600).join("\n") + "\n… (diff truncated)" : body;
+}
+
+/** Per-file diffs (original src vs its optimized counterpart). */
+function buildDiffs(base, outAbs, files) {
+  const diffs = [];
+  for (const f of files) {
+    const opt = optimizedFor(base, outAbs, f);
+    if (!opt) continue;
+    const diff = unifiedDiff(f, opt);
+    if (diff.trim()) diffs.push({ file: relative(base, f), diff });
+  }
+  return diffs;
+}
+
 function writeReport(base, { changes, gasBefore, gasAfter, savedPct, verified, message, outName }) {
   const lines = [
     "# Gas Optimization Report", "",
@@ -302,10 +331,12 @@ async function main() {
     ? `Optimized with ${engine === "claude" ? "Claude" : "the mock pass"} into ${outName}/ and verified with Foundry tests.`
     : `Optimized with ${engine === "claude" ? "Claude" : "the mock pass"} into ${outName}/; Foundry verification unavailable.`;
 
+  const diffs = buildDiffs(base, outAbs, files);
+
   writeResult({
     ok: true, engine, verified, outDir: outName,
     gasBefore: gasBefore || undefined, gasAfter: gasAfter || undefined,
-    savedPct, changes, costUsd: agentMeta?.cost, message,
+    savedPct, changes, diffs, costUsd: agentMeta?.cost, message,
   });
   if (!existsSync(join(base, "OPTIMIZATION_REPORT.md"))) {
     writeReport(base, { changes, gasBefore, gasAfter, savedPct, verified, message, outName });

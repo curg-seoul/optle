@@ -238,3 +238,40 @@ a.primary.download {
   text-align: center;
   margin-top: 8px;
 }
+
+/* --- diff view (GitHub-PR style, accordion) --- */
+.diffs { margin-top: 8px; }
+.diff-file {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  background: #14171d;
+}
+.diff-file > summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: #cbd5e1;
+  background: #1b2027;
+  user-select: none;
+  list-style: none;
+}
+.diff-file > summary::-webkit-details-marker { display: none; }
+.diff-file > summary::before { content: "▸ "; color: var(--muted); }
+.diff-file[open] > summary::before { content: "▾ "; }
+.diff {
+  margin: 0;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+.diff .dl { padding: 0 12px; white-space: pre; }
+.diff .dl.add { background: #12331f; color: #86efac; }
+.diff .dl.del { background: #3a1416; color: #fca5a5; }
+.diff .dl.hunk { background: #11253a; color: #7dd3fc; }
+.diff .dl.ctx { color: #9aa7b2; }

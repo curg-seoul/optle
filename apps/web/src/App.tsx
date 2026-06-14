@@ -34,6 +34,33 @@ function UsdcBalance() {
   return <span className="usdc-balance">{text} USDC</span>;
 }
 
+function DiffView({ diffs }: { diffs?: { file: string; diff: string }[] }) {
+  if (!diffs || diffs.length === 0) return null;
+  return (
+    <div className="diffs">
+      <h3>Changes (original → optimized)</h3>
+      {diffs.map((d, i) => (
+        <details key={d.file} open={i === 0} className="diff-file">
+          <summary>{d.file}</summary>
+          <pre className="diff">
+            {d.diff.split("\n").map((line, j) => {
+              if (
+                line.startsWith("diff --git") || line.startsWith("index ") ||
+                line.startsWith("--- ") || line.startsWith("+++ ")
+              ) return null;
+              let cls = "ctx";
+              if (line.startsWith("@@")) cls = "hunk";
+              else if (line.startsWith("+")) cls = "add";
+              else if (line.startsWith("-")) cls = "del";
+              return <div key={j} className={`dl ${cls}`}>{line || " "}</div>;
+            })}
+          </pre>
+        </details>
+      ))}
+    </div>
+  );
+}
+
 type Phase = "idle" | "uploading" | "ready" | "paying" | "running" | "done" | "error";
 
 const STAGE_LABEL: Record<string, string> = {
@@ -245,6 +272,8 @@ export function App() {
                       </li>
                     ))}
                   </ul>
+
+                  <DiffView diffs={result.diffs} />
 
                   {downloadUrl && (
                     <a className="primary download" href={downloadUrl} target="_blank" rel="noreferrer">
