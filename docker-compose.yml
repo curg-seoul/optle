@@ -19,10 +19,29 @@ services:
       # Override for the compose network: reach the facilitator by service name.
       FACILITATOR_URL: http://facilitator:8090
       PAYMENT_MODE: enforce
+      # Per-job working dirs. JOBS_DIR is this container's view; HOST_JOBS_DIR is
+      # the SAME path on the host, so `docker run -v` (sibling runner) resolves it.
+      JOBS_DIR: /jobs
+      HOST_JOBS_DIR: /srv/optle-jobs
+      RUNNER_IMAGE: optle-runner
+    volumes:
+      # Spawn sibling runner containers via the host docker daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Share per-job dirs with the host (and thus with runner containers).
+      - /srv/optle-jobs:/jobs
     expose:
       - "8080"
     depends_on:
       - facilitator
+
+  # Build-only: produces the `optle-runner` image the server spawns per job.
+  # Not started by `up`. Build it with: docker compose --profile build build runner
+  runner:
+    profiles: ["build"]
+    image: optle-runner
+    build:
+      context: .
+      dockerfile: apps/runner/Dockerfile
 
   facilitator:
     build: ./apps/facilitator
