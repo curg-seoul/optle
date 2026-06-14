@@ -1,0 +1,51 @@
+# Production stack for the x402 gas-optimizer backend (Tencent Cloud CVM).
+# Frontend is hosted separately on Netlify (optle.hanjun.kim) and proxies
+# /api + /health here via netlify.toml.
+#
+#   Caddy (auto-HTTPS for api.optle.hanjun.kim)  -> server:8080
+#                                                     -> facilitator:8090 (internal only)
+#
+# Only Caddy publishes ports (80/443). server + facilitator stay on the internal
+# compose network and are never exposed to the internet.
+#
+# Secrets come from each app's .env (copy them onto the CVM before `up`).
+services:
+  server:
+    build: ./apps/server
+    restart: unless-stopped
+    env_file:
+      - ./apps/server/.env
+    environment:
+      # Override for the compose network: reach the facilitator by service name.
+      FACILITATOR_URL: http://facilitator:8090
+      PAYMENT_MODE: enforce
+    expose:
+      - "8080"
+    depends_on:
+      - facilitator
+
+  facilitator:
+    build: ./apps/facilitator
+    restart: unless-stopped
+    env_file:
+      - ./apps/facilitator/.env
+    # No published ports — only `server` reaches it over the internal network.
+    expose:
+      - "8090"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - server
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,5 @@
+# Caddy auto-provisions a Let's Encrypt cert for this domain (point an A record
+# at the CVM's public IP first). Reverse-proxies to the server container.
+api.optle.hanjun.kim {
+	reverse_proxy server:8080
+}

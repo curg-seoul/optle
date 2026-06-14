@@ -4,6 +4,9 @@ import { paymentGate } from "./x402.js";
 import { optimize } from "./optimize.js";
 
 const app = express();
+// Behind Caddy (and Netlify's proxy): read X-Forwarded-Proto/Host so the 402
+// `resource` URL reflects the public https origin, not the internal one.
+app.set("trust proxy", true);
 app.use(express.json({ limit: "2mb" }));
 
 // Minimal CORS so a separately-hosted frontend can call us (dev uses a Vite
