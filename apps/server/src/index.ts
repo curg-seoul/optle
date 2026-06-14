@@ -155,6 +155,17 @@ app.listen(config.port, () => {
   console.log(`  facilitator: ${config.facilitator.url}${config.facilitator.apiKey ? "" : "  (no API key set)"}`);
   console.log(`  COS:         ${cosEnabled ? `${config.cos.bucket} (${config.cos.region})` : "NOT configured"}`);
   console.log(`  runner:      ${config.runner.image} (jobs at ${config.runner.jobsDir})`);
+
+  // Mirror the engine selection runContainer() makes, so it's visible at boot.
+  const hasKey = Boolean(config.anthropicApiKey && config.anthropicApiKey !== "sk-ant-REPLACE_ME");
+  const hasToken = Boolean(config.oauthToken);
+  let engine: string;
+  if (config.runner.engine === "mock") engine = "mock (OPTLE_ENGINE=mock)";
+  else if (hasToken) engine = "Claude (subscription token)";
+  else if (hasKey) engine = "Claude (ANTHROPIC_API_KEY)";
+  else engine = "mock (no ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN set)";
+  console.log(`  engine:      ${engine}`);
+
   if (config.payment.mode === "bypass") {
     console.warn("  ⚠️  PAYMENT_MODE=bypass — x402 gate is OFF (local demo only).");
   }
