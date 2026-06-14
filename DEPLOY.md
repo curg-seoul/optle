@@ -27,13 +27,12 @@ CORS needed — uploads go through the server, downloads use a presigned GET.
    only — `8080`/`8090` stay internal to the compose network.
 2. Install Docker: `curl -fsSL https://get.docker.com | sh`
 3. Point an A record for your API domain → VM public IP (Caddy needs it for a cert).
-4. Clone the repo and create the env files from the templates (gitignored):
+4. Copy each `.env.example` to `.env` and fill it in (all gitignored):
+   - root `.env` — `API_DOMAIN` (the domain Caddy serves and gets a cert for).
    - `apps/server/.env` — `PAY_TO_ADDRESS`, `PAYMENT_ASSET_*`, `COS_*`, and
      `OPTLE_ENGINE` (`mock` for a public site, `auto` + a Claude key for real runs).
    - `apps/facilitator/.env` — `RELAYER_PRIVATE_KEY` (funded with testnet gas),
      `RPC_URL`, `CHAIN_ID`.
-   - root `.env` (next to `docker-compose.yml`) — `API_DOMAIN=api.yourdomain` (the
-     domain Caddy serves and gets a cert for).
 5. Prepare the job dir, build the runner image, and launch:
    ```bash
    sudo mkdir -p /srv/optle-jobs && sudo chmod 777 /srv/optle-jobs
