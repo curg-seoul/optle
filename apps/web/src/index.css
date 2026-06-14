@@ -479,26 +479,32 @@ button.ghost:hover {
 
 .diff {
   margin: 0;
-  padding: 20px;
+  padding: 12px 0;
   font-family: var(--mono);
   font-size: 12px;
   overflow-x: auto;
-  background: #050607;
+  background: var(--inset);
+  color: var(--text-dim);
   line-height: 1.6;
 }
 
 .dl {
-  padding: 0 8px;
-  border-radius: 2px;
+  /* size to the longest line so the row background spans the full width even when
+     the diff is scrolled horizontally; min-width keeps short lines full-bleed. */
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
+  padding: 0 20px;
+  white-space: pre;
 }
 .dl.add { background: var(--diff-add-bg); color: var(--diff-add-fg); }
 .dl.del { background: var(--diff-del-bg); color: var(--diff-del-fg); }
-.dl.hunk { 
-  color: var(--diff-hunk-fg); 
-  opacity: 0.5; 
+.dl.hunk {
+  color: var(--diff-hunk-fg);
+  opacity: 0.75;
   font-style: italic;
   margin: 8px 0;
-  display: block;
 }
 
 .estimate-note {
