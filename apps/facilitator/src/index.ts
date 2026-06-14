@@ -214,6 +214,16 @@ app.post("/verify", async (req, res) => {
   }
 });
 
+// Serialize on-chain submissions so concurrent /settle calls don't race on the
+// relayer's account nonce. Only the send is serialized (each gets the next
+// pending nonce in order); waiting for the receipt happens outside the lock.
+let txChain: Promise<unknown> = Promise.resolve();
+function submitExclusive<T>(fn: () => Promise<T>): Promise<T> {
+  const result = txChain.then(fn, fn);
+  txChain = result.then(() => undefined, () => undefined);
+  return result;
+}
+
 app.post("/settle", async (req, res) => {
   try {
     const v = await validate(req.body as Envelope);
@@ -224,22 +234,24 @@ app.post("/settle", async (req, res) => {
     const { r, s, v: yv } = parseSignature(v.sig);
     const vByte = Number(yv ?? 27n);
 
-    const hash = await walletClient.writeContract({
-      address: v.asset,
-      abi: EIP3009_ABI,
-      functionName: "transferWithAuthorization",
-      args: [
-        v.message.from,
-        v.message.to,
-        v.message.value,
-        v.message.validAfter,
-        v.message.validBefore,
-        v.message.nonce,
-        vByte,
-        r,
-        s,
-      ],
-    });
+    const hash = await submitExclusive(() =>
+      walletClient.writeContract({
+        address: v.asset,
+        abi: EIP3009_ABI,
+        functionName: "transferWithAuthorization",
+        args: [
+          v.message.from,
+          v.message.to,
+          v.message.value,
+          v.message.validAfter,
+          v.message.validBefore,
+          v.message.nonce,
+          vByte,
+          r,
+          s,
+        ],
+      }),
+    );
 
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
     if (receipt.status !== "success") {
