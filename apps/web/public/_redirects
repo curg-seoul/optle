@@ -1,0 +1,9 @@
+# Netlify redirects (bundled into dist/ so manual/drag-drop deploys get them too).
+# Proxy API + health to the Tencent Cloud backend, keeping the browser same-origin
+# so the custom X-PAYMENT header needs no CORS preflight. Order matters: these must
+# precede the SPA fallback.
+/api/*    https://api.optle.hanjun.kim/api/:splat    200
+/health   https://api.optle.hanjun.kim/health        200
+
+# SPA fallback.
+/*        /index.html                                 200
