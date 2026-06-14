@@ -14,8 +14,10 @@ RUN curl -L https://foundry.paradigm.xyz | bash && foundryup
 #   docker build -t optle-runner -f apps/runner/Dockerfile .
 WORKDIR /app
 COPY apps/runner/package.json ./
+# Claude Agent SDK (real engine). Installed here; only loaded when ANTHROPIC_API_KEY is set.
+RUN npm install --omit=dev
 COPY apps/runner/run.mjs ./
-# The optimizer skill (reference for the future real-agent engine).
+# The gas-optimizer skill, appended to the agent's system prompt.
 COPY skills/gas-optimizer/SKILL.md ./SKILL.md
 
 # Operates on the mounted /work directory.

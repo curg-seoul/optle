@@ -110,8 +110,12 @@ verify → re-measure, packages the result to `output.zip` in COS →
 - All keys here are **testnet-only**. Don't reuse them anywhere with real value.
 - Pricing is by project-size tier ($0.50 / $3 / $10 — `apps/server/src/pricing.ts`),
   computed from the uploaded zip and injected into the x402 challenge per job.
-- The optimizer engine is currently a **mock** pass that real `forge` tests verify;
-  swap `optimizeSource()` in `apps/runner/run.mjs` for the Claude Agent SDK to go live.
+- Optimizer engine is chosen at runtime: set `ANTHROPIC_API_KEY` in
+  `apps/server/.env` to use the **Claude Agent SDK** (real edits + `forge` verify,
+  costs per job); leave it unset/`sk-ant-REPLACE_ME` to use the offline **mock**
+  pass. In AI mode the runner runs **with network** (to reach the Anthropic API),
+  so rebuild the runner image after changing `apps/runner/` and bump
+  `RUNNER_TIMEOUT_MS` for large projects. tier→model: large=opus, else sonnet.
 - `docker compose` reads the `.env` files at `up` time from the host — they are
   not baked into the images (`.dockerignore` excludes them).
 - Job state is in-memory (volatile across restarts); the files persist in COS.

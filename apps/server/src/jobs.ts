@@ -64,16 +64,23 @@ const localInputZip = (id: string) => join(config.runner.jobsDir, id, "input.zip
 const localOutputZip = (id: string) => join(config.runner.jobsDir, id, "output.zip");
 
 /** Run `docker run` for the runner image, resolving on exit or rejecting on timeout. */
-function runContainer(id: string): Promise<void> {
+function runContainer(id: string, tier: string): Promise<void> {
   const r = config.runner;
   const name = `optle-${id}`;
+  const aiKey = config.anthropicApiKey;
+  const useAgent = Boolean(aiKey && aiKey !== "sk-ant-REPLACE_ME");
+  // Larger projects get the stronger model.
+  const model = process.env.CLAUDE_MODEL || (tier === "large" ? "claude-opus-4-8" : "claude-sonnet-4-6");
+
   const args = [
     "run", "--rm", "--name", name,
-    "--network", "none",
+    // The real agent needs to reach the Anthropic API; the mock pass stays offline.
+    ...(useAgent ? [] : ["--network", "none"]),
     "--memory", r.memory,
     "--cpus", r.cpus,
     "--pids-limit", "256",
     "-v", `${hostWorkDir(id)}:/work`,
+    ...(useAgent ? ["-e", `ANTHROPIC_API_KEY=${aiKey}`, "-e", `OPTLE_MODEL=${model}`] : []),
     r.image,
   ];
 
@@ -119,7 +126,7 @@ export async function runJob(id: string): Promise<void> {
 
     // 2) run the isolated optimizer (snapshot -> optimize -> verify loop)
     job.stage = "optimizing";
-    await runContainer(id);
+    await runContainer(id, job.sizing.tier);
     job.stage = "verifying";
 
     // 3) read the runner's machine-readable result

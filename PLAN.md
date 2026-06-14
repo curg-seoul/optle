@@ -339,7 +339,7 @@ CLAUDE_MODEL=claude-sonnet-4-6
 | 격리 실행 | **server가 docker 소켓으로 형제 runner 컨테이너 spawn** | 업로드된 미신뢰 코드를 호스트가 아닌 일회용 컨테이너에서 실행. `--rm --network none --memory/--cpus/--pids` 제한 + 타임아웃. server 이미지에 docker CLI. |
 | 컨테이너 I/O | **호스트 바인드 디렉토리 공유** (`HOST_JOBS_DIR`) | server(컨테이너)가 `docker run -v ${HOST_JOBS_DIR}/<id>/work:/work` 하려면 호스트 경로가 필요 → compose에서 동일 호스트 경로를 server에 `/jobs`로 마운트하고 `HOST_JOBS_DIR` env로 매핑. runner는 오프라인(`--network none`)으로 COS 접근 불필요(I/O는 server가 담당). |
 | 가격 책정 | **3-tier 동적, `max(.sol 파일수, .sol 총 바이트)` 기준** | 업로드 시 .zip 내 `*.sol`(test/script/lib 제외) 수와 합산 용량으로 tier 결정 → 402 챌린지에 반영. |
-| 최적화 엔진 | **mock-first** (regex 변환 + 선택적 forge 스냅샷) | PLAN 원칙(개발 중 AI 비용 0) 유지. 엔진 함수가 seam → 나중에 Claude Agent SDK로 교체. |
+| 최적화 엔진 | **런타임 선택**: `ANTHROPIC_API_KEY` 있으면 **Claude Agent SDK**(skill 로드, 파일 편집+forge 직접 실행), 없으면 **mock** regex pass | mock은 비용 0·오프라인 유지. 실 엔진은 PoC(`poc/run.ts`)와 동일한 `query()` 설정. tier별 모델: large→opus, 그 외→sonnet. ⚠️ AI 모드는 Anthropic API 호출 때문에 runner의 `--network none`을 해제(잡당 비용 발생). |
 | 잡 상태 | **in-memory Map + stage 필드** | `pending→running(queued/downloading/optimizing/verifying/packaging)→done|error`. 폴링. 재시작 시 휘발(데모 OK). |
 
 ### 11.3 가격 tier

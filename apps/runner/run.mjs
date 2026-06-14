@@ -1,25 +1,28 @@
 /**
  * Isolated gas-optimization runner. Operates on the mounted /work directory.
  *
- * Loop (mirrors skills/gas-optimizer/SKILL.md):
- *   1. locate the project + Solidity sources
- *   2. baseline gas snapshot (forge test --gas-report) if it's a buildable Foundry project
- *   3. apply behaviour-preserving optimizations (currently a MOCK regex pass —
- *      this is the seam for the real Claude Agent SDK engine)
- *   4. verify: forge build + test must still pass; revert if they break
- *   5. re-measure gas, compute savings
- *   6. write OPTIMIZATION_REPORT.md (kept in the result zip) and
- *      OPTLE_RESULT.json (machine-readable; the server strips it from the zip)
+ * Two engines, chosen at runtime:
+ *   - ANTHROPIC_API_KEY set  → real Claude Agent SDK (edits files + runs forge
+ *     itself, following skills/gas-optimizer/SKILL.md). Needs network.
+ *   - otherwise               → MOCK regex pass (offline).
  *
- * Writes nothing outside /work. Exit 0 on success (even "no foundry" is success).
+ * Loop (mirrors SKILL.md): baseline snapshot → optimize → forge verify → revert
+ * if broken (mock) → re-measure → write OPTIMIZATION_REPORT.md + OPTLE_RESULT.json
+ * (the server strips the result json from the downloadable zip).
+ *
+ * Writes nothing outside /work. Exit 0 on success.
  */
 import {
   readdirSync, readFileSync, writeFileSync, statSync, existsSync,
 } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 
 const WORK = process.env.WORK_DIR ?? "/work";
+const HERE = dirname(fileURLToPath(import.meta.url));
+// Make forge reachable for our own measurements and the agent's Bash tool.
+process.env.PATH = `/root/.foundry/bin:${process.env.HOME ?? ""}/.foundry/bin:${process.env.PATH}`;
 
 function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {
@@ -35,7 +38,6 @@ function walk(dir, out = []) {
   return out;
 }
 
-/** Project root = dir containing foundry.toml (search work + one level of subdirs). */
 function findProjectRoot() {
   if (existsSync(join(WORK, "foundry.toml"))) return WORK;
   for (const name of readdirSync(WORK)) {
@@ -45,7 +47,6 @@ function findProjectRoot() {
   return null;
 }
 
-/** Source .sol files to optimize (exclude tests/scripts/libs/build dirs). */
 function sourceSolFiles(base) {
   return walk(base).filter((p) => {
     if (!p.endsWith(".sol")) return false;
@@ -66,7 +67,6 @@ function tryForge(cmd, cwd) {
   }
 }
 
-/** Sum of avg gas across function rows in a `forge test --gas-report` table. */
 function totalGas(report) {
   let total = 0;
   for (const line of report.split("\n")) {
@@ -81,11 +81,18 @@ function totalGas(report) {
   return total;
 }
 
-/** MOCK optimizer pass. SEAM: replace with the Claude Agent SDK engine. */
+function readSkillBody() {
+  const candidates = [join(HERE, "SKILL.md"), join(HERE, "..", "..", "skills", "gas-optimizer", "SKILL.md")];
+  for (const p of candidates) {
+    if (existsSync(p)) return readFileSync(p, "utf8").replace(/^---\n[\s\S]*?\n---\n/, "").trim();
+  }
+  return "";
+}
+
+/** MOCK optimizer pass. */
 function optimizeSource(code) {
   let out = code;
   const changes = [];
-
   const postInc = out.match(/\b([A-Za-z_]\w*)\+\+/g)?.length ?? 0;
   if (postInc) {
     out = out.replace(/\b([A-Za-z_]\w*)\+\+/g, "++$1");
@@ -97,125 +104,179 @@ function optimizeSource(code) {
     changes.push({ rule: "drop-zero-init", kind: "applied", count: zeroInit, description: "uint x = 0; → uint x; — default value is already zero." });
   }
   const lengthInLoop = out.match(/for\s*\([^;]*;[^;]*\.length[^;]*;/g)?.length ?? 0;
-  if (lengthInLoop) {
-    changes.push({ rule: "cache-array-length", kind: "detected", count: lengthInLoop, description: "`.length` read inside a loop condition — cache it in a local." });
-  }
+  if (lengthInLoop) changes.push({ rule: "cache-array-length", kind: "detected", count: lengthInLoop, description: "`.length` read inside a loop condition — cache it in a local." });
   const requireStr = out.match(/require\s*\([^;]*,\s*["'][^"']*["']\s*\)/g)?.length ?? 0;
-  if (requireStr) {
-    changes.push({ rule: "custom-errors", kind: "detected", count: requireStr, description: "require(cond, \"msg\") can become a custom error — saves deploy + revert gas." });
-  }
+  if (requireStr) changes.push({ rule: "custom-errors", kind: "detected", count: requireStr, description: "require(cond, \"msg\") can become a custom error." });
   const publicFns = out.match(/function\s+\w+\s*\([^)]*\)\s*public\b/g)?.length ?? 0;
-  if (publicFns) {
-    changes.push({ rule: "external-visibility", kind: "detected", count: publicFns, description: "`public` functions never called internally can be `external`." });
-  }
+  if (publicFns) changes.push({ rule: "external-visibility", kind: "detected", count: publicFns, description: "`public` functions never called internally can be `external`." });
   return { out, changes };
+}
+
+/** Real engine: run the Claude Agent SDK in the project dir. */
+async function runAgent(base, model) {
+  const { query } = await import("@anthropic-ai/claude-agent-sdk");
+  const skill = readSkillBody();
+  const prompt =
+    "This is a Solidity project (Foundry if foundry.toml is present). Optimize the " +
+    "gas usage of the contracts under src/ following your gas-optimizer instructions. " +
+    "If it's a Foundry project, verify with `forge test --gas-report` that all tests " +
+    "still pass and gas went down, reverting any change that breaks a test. Finally " +
+    "write OPTIMIZATION_REPORT.md at the project root.";
+
+  let cost = 0;
+  let turns = 0;
+  for await (const msg of query({
+    prompt,
+    options: {
+      cwd: base,
+      model,
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+      allowedTools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
+      systemPrompt: { type: "preset", preset: "claude_code", append: skill },
+    },
+  })) {
+    if (msg.type === "assistant") {
+      for (const block of msg.message.content) {
+        if (block.type === "text" && block.text.trim()) console.log(`[agent] ${block.text.trim().slice(0, 300)}`);
+        else if (block.type === "tool_use") {
+          const arg = block.name === "Bash" ? block.input.command : (block.input.file_path ?? "");
+          console.log(`[agent] · ${block.name}: ${String(arg).slice(0, 120)}`);
+        }
+      }
+    } else if (msg.type === "result") {
+      turns = msg.num_turns;
+      if (msg.subtype === "success") cost = msg.total_cost_usd;
+      else console.error(`[agent ended: ${msg.subtype}]`);
+    }
+  }
+  return { cost, turns };
+}
+
+/** Pull change bullets out of an agent-written OPTIMIZATION_REPORT.md. */
+function parseReportChanges(base) {
+  const p = join(base, "OPTIMIZATION_REPORT.md");
+  if (!existsSync(p)) return [];
+  const lines = readFileSync(p, "utf8").split("\n");
+  const changes = [];
+  let inChanges = false;
+  for (const line of lines) {
+    if (/^##\s/.test(line)) { inChanges = /changes/i.test(line); continue; }
+    if (inChanges) {
+      const m = line.match(/^\s*[-*]\s+(.*)$/);
+      if (m && m[1].trim()) changes.push({ rule: "agent", kind: "applied", count: 1, description: m[1].trim() });
+    }
+  }
+  return changes;
 }
 
 function writeResult(result) {
   writeFileSync(join(WORK, "OPTLE_RESULT.json"), JSON.stringify(result, null, 2));
 }
 
-function writeReport({ changes, gasBefore, gasAfter, savedPct, verified, message }) {
+function writeReport(base, { changes, gasBefore, gasAfter, savedPct, verified, message }) {
   const lines = [
-    "# Gas Optimization Report",
-    "",
-    message ? `> ${message}` : "",
-    "",
+    "# Gas Optimization Report", "",
+    message ? `> ${message}` : "", "",
     "## Changes",
-    ...(changes.length
-      ? changes.map((c) => `- **${c.rule}** (${c.kind}, ×${c.count}) — ${c.description}`)
-      : ["- No optimization opportunities detected."]),
-    "",
-    "## Gas",
+    ...(changes.length ? changes.map((c) => `- **${c.rule}** (${c.kind}, ×${c.count}) — ${c.description}`) : ["- No optimization opportunities detected."]),
+    "", "## Gas",
     verified
       ? `- Verified with \`forge test --gas-report\`.\n- Before: **${gasBefore}**, After: **${gasAfter}** → **−${savedPct}%**`
-      : `- Not verified with Foundry (no buildable project). Estimated saving: **−${savedPct}%**`,
+      : `- Not verified with Foundry. ${gasBefore ? `Before: ${gasBefore}, After: ${gasAfter}.` : "Estimated."}`,
     "",
   ];
-  writeFileSync(join(WORK, "OPTIMIZATION_REPORT.md"), lines.filter((l) => l !== undefined).join("\n"));
+  writeFileSync(join(base, "OPTIMIZATION_REPORT.md"), lines.filter((l) => l !== undefined).join("\n"));
 }
 
-function main() {
+async function main() {
   const root = findProjectRoot();
   const base = root ?? WORK;
   const files = sourceSolFiles(base);
 
   if (files.length === 0) {
-    const r = { ok: false, verified: false, message: "No Solidity source files found." };
+    const r = { ok: false, verified: false, engine: "none", message: "No Solidity source files found." };
     writeResult(r);
-    writeReport({ changes: [], savedPct: 0, verified: false, message: r.message });
+    writeReport(base, { changes: [], savedPct: 0, verified: false, message: r.message });
     return;
   }
 
-  // 2) baseline (only if it's a Foundry project that builds)
-  let canVerify = false;
+  // baseline (only if it's a Foundry project that builds)
   let gasBefore = 0;
-  if (root) {
-    const build = tryForge("forge build", root);
-    if (build.ok) {
-      const report = tryForge("forge test --gas-report", root);
-      if (report.ok) {
-        gasBefore = totalGas(report.out);
-        canVerify = gasBefore > 0;
-      }
+  if (root && tryForge("forge build", root).ok) {
+    const report = tryForge("forge test --gas-report", root);
+    if (report.ok) gasBefore = totalGas(report.out);
+  }
+
+  const useAgent = Boolean(process.env.ANTHROPIC_API_KEY);
+  const engine = useAgent ? "claude" : "mock";
+  const model = process.env.OPTLE_MODEL || "claude-sonnet-4-6";
+  console.log(`[runner] engine=${engine}${useAgent ? ` model=${model}` : ""} files=${files.length} foundry=${Boolean(root)}`);
+
+  let changes = [];
+  let agentMeta;
+  const originals = new Map(files.map((f) => [f, readFileSync(f, "utf8")]));
+
+  if (useAgent) {
+    agentMeta = await runAgent(base, model);
+    changes = parseReportChanges(base); // agent writes the report itself
+  } else {
+    for (const f of files) {
+      const before = originals.get(f);
+      const { out, changes: cs } = optimizeSource(before);
+      if (out !== before) writeFileSync(f, out);
+      changes.push(...cs);
     }
   }
 
-  // 3) optimize (mock), keeping originals for possible revert
-  const originals = new Map();
-  const allChanges = [];
-  for (const f of files) {
-    const before = readFileSync(f, "utf8");
-    originals.set(f, before);
-    const { out, changes } = optimizeSource(before);
-    if (out !== before) writeFileSync(f, out);
-    allChanges.push(...changes);
-  }
-
-  // 4) verify; revert all if build/test breaks
+  // verify + re-measure
   let verified = false;
   let gasAfter = 0;
-  if (canVerify) {
+  if (root) {
     const build = tryForge("forge build", root);
     const test = build.ok ? tryForge("forge test --gas-report", root) : build;
     if (build.ok && test.ok) {
       gasAfter = totalGas(test.out);
       verified = true;
-    } else {
-      for (const [f, src] of originals) writeFileSync(f, src); // revert
+    } else if (!useAgent) {
+      for (const [f, src] of originals) writeFileSync(f, src); // mock: revert breakage
     }
   }
 
-  // 5) compute savings
-  const applied = allChanges.filter((c) => c.kind === "applied").reduce((n, c) => n + c.count, 0);
-  const detected = allChanges.filter((c) => c.kind === "detected").reduce((n, c) => n + c.count, 0);
+  // savings
   let savedPct;
-  if (verified && gasBefore > 0) {
+  if (gasBefore > 0 && gasAfter > 0) {
     savedPct = Number((((gasBefore - gasAfter) / gasBefore) * 100).toFixed(1));
   } else {
-    // heuristic estimate when we can't run Foundry
-    const frac = Math.min(0.35, applied * 0.02 + detected * 0.03);
-    savedPct = Number((frac * 100).toFixed(1));
+    const applied = changes.filter((c) => c.kind === "applied").reduce((n, c) => n + c.count, 0);
+    const detected = changes.filter((c) => c.kind === "detected").reduce((n, c) => n + c.count, 0);
+    savedPct = Number((Math.min(0.35, applied * 0.02 + detected * 0.03) * 100).toFixed(1));
   }
+
+  const message = verified
+    ? `Optimized with ${engine === "claude" ? "Claude" : "the mock pass"} and verified with Foundry tests.`
+    : `Optimized with ${engine === "claude" ? "Claude" : "the mock pass"}; Foundry verification unavailable.`;
 
   const result = {
     ok: true,
+    engine,
     verified,
-    gasBefore: verified ? gasBefore : undefined,
-    gasAfter: verified ? gasAfter : undefined,
+    gasBefore: gasBefore || undefined,
+    gasAfter: gasAfter || undefined,
     savedPct,
-    changes: allChanges,
-    message: verified
-      ? "Optimized and verified with Foundry tests."
-      : "Optimized (mock pass); Foundry verification unavailable for this project.",
+    changes,
+    costUsd: agentMeta?.cost,
+    message,
   };
   writeResult(result);
-  writeReport({ changes: allChanges, gasBefore, gasAfter, savedPct, verified, message: result.message });
+  // For the agent, the report already exists; only (re)write for the mock engine
+  // or if the agent failed to produce one.
+  if (!useAgent || !existsSync(join(base, "OPTIMIZATION_REPORT.md"))) {
+    writeReport(base, { changes, gasBefore, gasAfter, savedPct, verified, message });
+  }
 }
 
-try {
-  main();
-} catch (err) {
-  writeResult({ ok: false, verified: false, message: `runner error: ${String(err)}` });
+main().catch((err) => {
+  writeResult({ ok: false, verified: false, engine: "error", message: `runner error: ${String(err)}` });
   process.exitCode = 1;
-}
+});
