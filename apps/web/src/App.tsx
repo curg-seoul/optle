@@ -1,7 +1,39 @@
 import { useState } from "react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useAccount, useWalletClient } from "wagmi";
-import { payAndOptimize, type OptimizeResult } from "./x402";
+import { useAccount, useWalletClient, useReadContract } from "wagmi";
+import { formatUnits, erc20Abi } from "viem";
+import {
+  startOptimize,
+  payAndOptimize,
+  type OptimizeResult,
+  type PaymentRequirements,
+} from "./x402";
+
+// TestUSDC on Mantle Sepolia (6 decimals).
+const USDC_ADDRESS = "0x65F83bDA796401f15AC9e290Ab39B1157b86451B" as const;
+const USDC_DECIMALS = 6;
+
+function UsdcBalance() {
+  const { address } = useAccount();
+  const { data, isLoading } = useReadContract({
+    address: USDC_ADDRESS,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: address ? [address] : undefined,
+    query: { enabled: !!address, refetchInterval: 10_000 },
+  });
+
+  if (!address) return null;
+  const text =
+    data === undefined
+      ? isLoading
+        ? "…"
+        : "—"
+      : Number(formatUnits(data, USDC_DECIMALS)).toLocaleString(undefined, {
+          maximumFractionDigits: 2,
+        });
+  return <span className="usdc-balance">{text} USDC</span>;
+}
 
 const SAMPLE = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
@@ -43,7 +75,11 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<OptimizeResult | null>(null);
+  // When set, we've fetched the x402 challenge and are awaiting the user's
+  // confirmation to sign & pay (step 2).
+  const [pending, setPending] = useState<PaymentRequirements | null>(null);
 
+  // Step 1: ask the server what it costs (or run free if PAYMENT_MODE=bypass).
   async function onOptimize() {
     if (!code.trim()) {
       setError("Paste a contract first (or click “Load sample”).");
@@ -51,9 +87,15 @@ export function App() {
     }
     setBusy(true);
     setError(null);
+    setResult(null);
+    setPending(null);
     try {
-      const r = await payAndOptimize(code, walletClient ?? undefined, address, chainId);
-      setResult(r);
+      const start = await startOptimize(code);
+      if (start.kind === "result") {
+        setResult(start.result); // free (bypass mode) — no payment needed
+      } else {
+        setPending(start.requirements); // show the price, await confirm
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -61,12 +103,37 @@ export function App() {
     }
   }
 
+  // Step 2: user confirmed — sign the EIP-3009 authorization and pay.
+  async function onConfirmPay() {
+    if (!pending) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await payAndOptimize(code, pending, walletClient ?? undefined, address, chainId);
+      setResult(r);
+      setPending(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Human-readable price from the actual 402 challenge (6-decimal USDC).
+  const priceText = pending
+    ? `${Number(formatUnits(BigInt(pending.maxAmountRequired), USDC_DECIMALS)).toLocaleString(
+        undefined,
+        { maximumFractionDigits: 6 },
+      )} USDC`
+    : null;
+
   return (
     <>
       <header>
         <h1>⛽ Solidity Gas Optimizer</h1>
-        <span className="mock-badge">Mantle Sepolia · x402 · 0.01 USDC</span>
-        <div style={{ marginLeft: "auto" }}>
+        <span className="mock-badge">Mantle Sepolia · x402</span>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <UsdcBalance />
           <ConnectButton />
         </div>
       </header>
@@ -83,9 +150,26 @@ export function App() {
             onChange={(e) => setCode(e.target.value)}
             placeholder="Paste a single Solidity contract here…"
           />
-          <button className="primary" onClick={onOptimize} disabled={busy}>
-            {busy ? "Working…" : "Optimize gas — pay 0.01 USDC →"}
-          </button>
+          {!pending ? (
+            <button className="primary" onClick={onOptimize} disabled={busy}>
+              {busy ? "Working…" : "Optimize gas →"}
+            </button>
+          ) : (
+            <div className="pay-confirm">
+              <div className="pay-line">
+                <span className="pay-label">Payment required</span>
+                <span className="pay-amount">{priceText}</span>
+              </div>
+              <div className="pay-actions">
+                <button className="ghost" onClick={() => setPending(null)} disabled={busy}>
+                  Cancel
+                </button>
+                <button className="primary" onClick={onConfirmPay} disabled={busy}>
+                  {busy ? "Signing…" : `Confirm & pay ${priceText} →`}
+                </button>
+              </div>
+            </div>
+          )}
           {error && <p className="error">{error}</p>}
         </section>
 

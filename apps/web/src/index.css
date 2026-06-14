@@ -38,6 +38,36 @@ header h1 { font-size: 18px; margin: 0; }
   border-radius: 999px;
 }
 
+.usdc-balance {
+  font-size: 13px;
+  font-weight: 600;
+  color: #86efac;
+  background: #11331f;
+  border: 1px solid #1c5a36;
+  padding: 5px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.pay-confirm {
+  border: 1px solid #1c4a5a;
+  background: #0e2530;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pay-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.pay-label { font-size: 13px; color: var(--muted, #9aa7b2); }
+.pay-amount { font-size: 18px; font-weight: 700; color: #7dd3fc; }
+.pay-actions { display: flex; gap: 10px; }
+.pay-actions .primary { flex: 1; }
+
 main {
   display: grid;
   grid-template-columns: 1fr 1fr;

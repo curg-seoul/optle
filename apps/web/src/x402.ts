@@ -17,7 +17,7 @@ export interface OptimizeResult {
   savedPct: number;
 }
 
-interface PaymentRequirements {
+export interface PaymentRequirements {
   scheme: string;
   network: string;
   maxAmountRequired: string;
@@ -26,6 +26,11 @@ interface PaymentRequirements {
   asset: `0x${string}`;
   extra: { name: string; version: string };
 }
+
+/** Result of step 1: either the endpoint was free (bypass) or it wants payment. */
+export type OptimizeStart =
+  | { kind: "result"; result: OptimizeResult }
+  | { kind: "challenge"; requirements: PaymentRequirements };
 
 const ENDPOINT = "/api/optimize";
 
@@ -44,12 +49,30 @@ async function readResult(res: Response): Promise<OptimizeResult> {
 }
 
 /**
- * Calls the x402-gated optimize endpoint.
+ * Step 1 — POST without payment to discover the price.
  *
- * 1. POST without payment. If the server returns 200 (e.g. PAYMENT_MODE=bypass),
- *    we're done — no wallet needed.
- * 2. On 402, build & sign an EIP-3009 `transferWithAuthorization` (gasless) from
- *    the returned requirements, attach it as the X-PAYMENT header, and retry.
+ * If the server returns 200 (e.g. PAYMENT_MODE=bypass) we're done and return the
+ * result directly. On 402 we return the payment requirements so the UI can show
+ * the amount and ask the user to confirm before signing.
+ */
+export async function startOptimize(code: string): Promise<OptimizeStart> {
+  const headers = { "Content-Type": "application/json" };
+  const body = JSON.stringify({ code });
+
+  const res = await fetch(ENDPOINT, { method: "POST", headers, body });
+  if (res.status !== 402) {
+    return { kind: "result", result: await readResult(res) };
+  }
+
+  const challenge = await res.json();
+  const reqs = challenge.accepts?.[0] as PaymentRequirements | undefined;
+  if (!reqs) throw new Error("Malformed 402 response (no payment requirements).");
+  return { kind: "challenge", requirements: reqs };
+}
+
+/**
+ * Step 2 — confirm & pay. Builds & signs an EIP-3009 `transferWithAuthorization`
+ * (gasless) from the requirements, attaches it as the X-PAYMENT header, retries.
  *
  * Signing the EIP-712 typed data here (rather than via x402-fetch) keeps the
  * client chain-agnostic, matching our hand-rolled server — so Mantle works even
@@ -57,6 +80,7 @@ async function readResult(res: Response): Promise<OptimizeResult> {
  */
 export async function payAndOptimize(
   code: string,
+  reqs: PaymentRequirements,
   wallet: WalletClient | undefined,
   account: `0x${string}` | undefined,
   chainId: number | undefined,
@@ -64,14 +88,6 @@ export async function payAndOptimize(
   const headers = { "Content-Type": "application/json" };
   const body = JSON.stringify({ code });
 
-  // 1) try without payment
-  let res = await fetch(ENDPOINT, { method: "POST", headers, body });
-  if (res.status !== 402) return readResult(res);
-
-  // 2) 402 → pay
-  const challenge = await res.json();
-  const reqs = challenge.accepts?.[0] as PaymentRequirements | undefined;
-  if (!reqs) throw new Error("Malformed 402 response (no payment requirements).");
   if (!wallet || !account || !chainId) {
     throw new Error("Connect your wallet (on Mantle Sepolia) to pay.");
   }
@@ -125,7 +141,7 @@ export async function payAndOptimize(
   };
   const xPayment = btoa(JSON.stringify(paymentPayload));
 
-  res = await fetch(ENDPOINT, {
+  const res = await fetch(ENDPOINT, {
     method: "POST",
     headers: { ...headers, "X-PAYMENT": xPayment },
     body,
