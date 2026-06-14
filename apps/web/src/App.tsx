@@ -15,9 +15,10 @@ import {
   type PaymentRequirements,
 } from "./x402";
 
-// TestUSDC on Mantle Sepolia (6 decimals).
-const USDC_ADDRESS = "0x65F83bDA796401f15AC9e290Ab39B1157b86451B" as const;
-const USDC_DECIMALS = 6;
+// Payment token (e.g. TestUSDC on Mantle Sepolia). Configured per deployment;
+// when unset, the header balance is simply hidden.
+const USDC_ADDRESS = import.meta.env.VITE_USDC_ADDRESS as `0x${string}` | undefined;
+const USDC_DECIMALS = Number(import.meta.env.VITE_USDC_DECIMALS ?? 6);
 
 function UsdcBalance() {
   const { address } = useAccount();
@@ -26,9 +27,9 @@ function UsdcBalance() {
     abi: erc20Abi,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
-    query: { enabled: !!address, refetchInterval: 10_000 },
+    query: { enabled: !!address && !!USDC_ADDRESS, refetchInterval: 10_000 },
   });
-  if (!address) return null;
+  if (!address || !USDC_ADDRESS) return null;
   const text =
     data === undefined
       ? isLoading ? "…" : "—"
