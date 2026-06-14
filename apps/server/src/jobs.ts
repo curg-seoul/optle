@@ -146,7 +146,7 @@ export async function runJob(id: string): Promise<void> {
     // 4) package work dir -> output.zip -> COS (skip build artifacts / vcs / deps)
     job.stage = "packaging";
     const outZip = new AdmZip();
-    const SKIP = /(^|\/)(out|cache|broadcast|node_modules|\.git)(\/|$)/;
+    const SKIP = /(^|\/)(out|cache|broadcast|node_modules|\.git|\.claude)(\/|$)/;
     outZip.addLocalFolder(workDir(id), undefined, (entry) => !SKIP.test(entry));
     outZip.writeZip(localOutputZip(id));
     await putFile(outputKey(id), localOutputZip(id));

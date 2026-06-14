@@ -5,6 +5,7 @@ export interface RunnerResult {
   ok: boolean;
   verified: boolean;
   engine?: "claude" | "mock" | "none" | "error";
+  outDir?: string;
   gasBefore?: number;
   gasAfter?: number;
   savedPct?: number;

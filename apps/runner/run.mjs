@@ -1,39 +1,38 @@
 /**
  * Isolated gas-optimization runner. Operates on the mounted /work directory.
  *
- * Two engines, chosen at runtime:
- *   - ANTHROPIC_API_KEY set  → real Claude Agent SDK (edits files + runs forge
- *     itself, following skills/gas-optimizer/SKILL.md). Needs network.
- *   - otherwise               → MOCK regex pass (offline).
+ * Output model (per the solidity-gas-optimizer skill): the ORIGINAL sources under
+ * src/ are never edited in place. The optimized variants are written to a
+ * separate `optimized/` directory (suffixed `optimized-<rand>` if one already
+ * exists), mirroring the original source layout. Verification swaps the optimized
+ * files into the source locations temporarily, runs `forge test --gas-report`,
+ * then restores the originals.
  *
- * Loop (mirrors SKILL.md): baseline snapshot → optimize → forge verify → revert
- * if broken (mock) → re-measure → write OPTIMIZATION_REPORT.md + OPTLE_RESULT.json
- * (the server strips the result json from the downloadable zip).
- *
- * Writes nothing outside /work. Exit 0 on success.
+ * Two engines:
+ *   - ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN set → Claude Agent SDK with
+ *     the solidity-gas-optimizer skill loaded natively. Needs network.
+ *   - otherwise → MOCK regex pass (offline).
  */
 import {
   readdirSync, readFileSync, writeFileSync, statSync, existsSync,
+  mkdirSync, rmSync, cpSync,
 } from "node:fs";
 import { join, relative, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { randomBytes } from "node:crypto";
 import { execSync } from "node:child_process";
 
 const WORK = process.env.WORK_DIR ?? "/work";
-const HERE = dirname(fileURLToPath(import.meta.url));
-// Make forge reachable for our own measurements and the agent's Bash tool.
+const SKILL_SRC = process.env.OPTLE_SKILL_SRC ?? "/app/skill/solidity-gas-optimizer";
 process.env.PATH = `/root/.foundry/bin:${process.env.HOME ?? ""}/.foundry/bin:${process.env.PATH}`;
 
 function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
-    const st = statSync(p);
-    if (st.isDirectory()) {
-      if (["node_modules", ".git", "out", "cache", "broadcast", "__MACOSX"].includes(name)) continue;
+    if (statSync(p).isDirectory()) {
+      if (["node_modules", ".git", ".claude", "out", "cache", "broadcast", "__MACOSX", "optimized"].includes(name)
+        || name.startsWith("optimized-")) continue;
       walk(p, out);
-    } else {
-      out.push(p);
-    }
+    } else out.push(p);
   }
   return out;
 }
@@ -54,8 +53,7 @@ function sourceSolFiles(base) {
     const file = rel[rel.length - 1];
     if (file.endsWith(".t.sol") || file.endsWith(".s.sol")) return false;
     return !rel.slice(0, -1).some((s) =>
-      ["test", "tests", "script", "scripts", "lib", "node_modules", "out", "cache"].includes(s),
-    );
+      ["test", "tests", "script", "scripts", "lib", "node_modules", "out", "cache"].includes(s));
   });
 }
 
@@ -81,15 +79,7 @@ function totalGas(report) {
   return total;
 }
 
-function readSkillBody() {
-  const candidates = [join(HERE, "SKILL.md"), join(HERE, "..", "..", "skills", "gas-optimizer", "SKILL.md")];
-  for (const p of candidates) {
-    if (existsSync(p)) return readFileSync(p, "utf8").replace(/^---\n[\s\S]*?\n---\n/, "").trim();
-  }
-  return "";
-}
-
-/** MOCK optimizer pass. */
+/** MOCK optimizer pass — returns optimized source + the changes it made. */
 function optimizeSource(code) {
   let out = code;
   const changes = [];
@@ -107,24 +97,30 @@ function optimizeSource(code) {
   if (lengthInLoop) changes.push({ rule: "cache-array-length", kind: "detected", count: lengthInLoop, description: "`.length` read inside a loop condition — cache it in a local." });
   const requireStr = out.match(/require\s*\([^;]*,\s*["'][^"']*["']\s*\)/g)?.length ?? 0;
   if (requireStr) changes.push({ rule: "custom-errors", kind: "detected", count: requireStr, description: "require(cond, \"msg\") can become a custom error." });
-  const publicFns = out.match(/function\s+\w+\s*\([^)]*\)\s*public\b/g)?.length ?? 0;
-  if (publicFns) changes.push({ rule: "external-visibility", kind: "detected", count: publicFns, description: "`public` functions never called internally can be `external`." });
   return { out, changes };
 }
 
-/** Real engine: run the Claude Agent SDK in the project dir. */
-async function runAgent(base, model) {
+/** Real engine: run the Claude Agent SDK with the skill loaded natively. */
+async function runAgent(base, model, outName) {
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
-  const skill = readSkillBody();
-  const prompt =
-    "This is a Solidity project (Foundry if foundry.toml is present). Optimize the " +
-    "gas usage of the contracts under src/ following your gas-optimizer instructions. " +
-    "If it's a Foundry project, verify with `forge test --gas-report` that all tests " +
-    "still pass and gas went down, reverting any change that breaks a test. Finally " +
-    "write OPTIMIZATION_REPORT.md at the project root.";
 
-  let cost = 0;
-  let turns = 0;
+  // Make the skill discoverable as a project skill (references resolve relative).
+  const skillDest = join(base, ".claude", "skills", "solidity-gas-optimizer");
+  if (existsSync(SKILL_SRC)) {
+    mkdirSync(dirname(skillDest), { recursive: true });
+    cpSync(SKILL_SRC, skillDest, { recursive: true });
+  } else {
+    console.error(`[runner] skill source not found at ${SKILL_SRC}`);
+  }
+
+  const prompt =
+    `Use your solidity-gas-optimizer skill to optimize the Solidity contracts under src/. ` +
+    `Write the optimized variants into the \`${outName}/\` directory, mirroring the original ` +
+    `source layout (e.g. src/Foo.sol -> ${outName}/src/Foo.sol). Do NOT modify the original ` +
+    `files in place. Verify with forge per the skill's verification gate, then write ` +
+    `OPTIMIZATION_REPORT.md at the project root.`;
+
+  let cost = 0, turns = 0;
   for await (const msg of query({
     prompt,
     options: {
@@ -132,9 +128,10 @@ async function runAgent(base, model) {
       model,
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
-      allowedTools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
-      systemPrompt: { type: "preset", preset: "claude_code", append: skill },
-      // Surface the underlying CLI subprocess errors in our logs.
+      allowedTools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep", "Skill"],
+      systemPrompt: { type: "preset", preset: "claude_code" },
+      settingSources: ["project"],
+      skills: ["solidity-gas-optimizer"],
       stderr: (data) => console.error(`[agent-stderr] ${String(data).trimEnd()}`),
     },
   })) {
@@ -142,7 +139,7 @@ async function runAgent(base, model) {
       for (const block of msg.message.content) {
         if (block.type === "text" && block.text.trim()) console.log(`[agent] ${block.text.trim().slice(0, 300)}`);
         else if (block.type === "tool_use") {
-          const arg = block.name === "Bash" ? block.input.command : (block.input.file_path ?? "");
+          const arg = block.name === "Bash" ? block.input.command : (block.input.file_path ?? block.input.command ?? "");
           console.log(`[agent] · ${block.name}: ${String(arg).slice(0, 120)}`);
         }
       }
@@ -152,10 +149,10 @@ async function runAgent(base, model) {
       else console.error(`[agent ended: ${msg.subtype}]`);
     }
   }
+  rmSync(join(base, ".claude"), { recursive: true, force: true }); // keep out of the result zip
   return { cost, turns };
 }
 
-/** Pull change bullets out of an agent-written OPTIMIZATION_REPORT.md. */
 function parseReportChanges(base) {
   const p = join(base, "OPTIMIZATION_REPORT.md");
   if (!existsSync(p)) return [];
@@ -163,20 +160,16 @@ function parseReportChanges(base) {
   const changes = [];
   let inChanges = false;
   for (const line of lines) {
-    if (/^#{1,6}\s/.test(line)) { inChanges = /change|optimi/i.test(line); continue; }
+    if (/^#{1,6}\s/.test(line)) { inChanges = /change|optimi|transform/i.test(line); continue; }
     if (inChanges) {
-      // bullets ("- x"), numbered ("1. x"), or table rows ("| x | ... |")
       const m = line.match(/^\s*(?:[-*]|\d+\.)\s+(.*)$/) || line.match(/^\s*\|\s*([^|]+?)\s*\|/);
       const desc = m?.[1]?.replace(/\*\*/g, "").trim();
-      if (desc && !/^-+$/.test(desc) && !/^(change|optimization)s?$/i.test(desc)) {
+      if (desc && !/^-+$/.test(desc) && !/^(change|optimization|transform)s?$/i.test(desc)) {
         changes.push({ rule: "agent", kind: "applied", count: 1, description: desc });
       }
     }
   }
-  // Fallback so the UI isn't empty when the agent used prose/tables we couldn't parse.
-  if (changes.length === 0 && existsSync(p)) {
-    changes.push({ rule: "agent", kind: "applied", count: 1, description: "See OPTIMIZATION_REPORT.md for details." });
-  }
+  if (changes.length === 0 && existsSync(p)) changes.push({ rule: "agent", kind: "applied", count: 1, description: "See OPTIMIZATION_REPORT.md for details." });
   return changes;
 }
 
@@ -184,19 +177,40 @@ function writeResult(result) {
   writeFileSync(join(WORK, "OPTLE_RESULT.json"), JSON.stringify(result, null, 2));
 }
 
-function writeReport(base, { changes, gasBefore, gasAfter, savedPct, verified, message }) {
+function writeReport(base, { changes, gasBefore, gasAfter, savedPct, verified, message, outName }) {
   const lines = [
     "# Gas Optimization Report", "",
-    message ? `> ${message}` : "", "",
-    "## Changes",
-    ...(changes.length ? changes.map((c) => `- **${c.rule}** (${c.kind}, ×${c.count}) — ${c.description}`) : ["- No optimization opportunities detected."]),
+    message ? `> ${message}` : "",
+    outName ? `\nOptimized sources are in \`${outName}/\` (originals under \`src/\` are unchanged).` : "",
+    "", "## Changes",
+    ...(changes.length ? changes.map((c) => `- ${c.description}`) : ["- No optimization opportunities detected."]),
     "", "## Gas",
     verified
       ? `- Verified with \`forge test --gas-report\`.\n- Before: **${gasBefore}**, After: **${gasAfter}** → **−${savedPct}%**`
-      : `- Not verified with Foundry. ${gasBefore ? `Before: ${gasBefore}, After: ${gasAfter}.` : "Estimated."}`,
+      : `- Foundry verification unavailable. ${gasBefore ? `Before: ${gasBefore}.` : ""}`,
     "",
   ];
   writeFileSync(join(base, "OPTIMIZATION_REPORT.md"), lines.filter((l) => l !== undefined).join("\n"));
+}
+
+/** For each original source file, find its optimized counterpart in outAbs. */
+function optimizedFor(base, outAbs, srcFile) {
+  const rel = relative(base, srcFile);
+  const mirrored = join(outAbs, rel);
+  if (existsSync(mirrored)) return mirrored;
+  // fallback: match by basename anywhere under outAbs
+  const baseName = rel.split("/").pop();
+  const stack = [outAbs];
+  while (stack.length) {
+    const d = stack.pop();
+    if (!existsSync(d)) continue;
+    for (const n of readdirSync(d)) {
+      const p = join(d, n);
+      if (statSync(p).isDirectory()) stack.push(p);
+      else if (n === baseName) return p;
+    }
+  }
+  return null;
 }
 
 async function main() {
@@ -211,85 +225,81 @@ async function main() {
     return;
   }
 
-  // baseline (only if it's a Foundry project that builds)
+  // Snapshot originals so src/ is always restored pristine.
+  const originals = new Map(files.map((f) => [f, readFileSync(f, "utf8")]));
+
+  // Baseline gas on the originals.
   let gasBefore = 0;
   if (root && tryForge("forge build", root).ok) {
     const report = tryForge("forge test --gas-report", root);
     if (report.ok) gasBefore = totalGas(report.out);
   }
 
-  const useAgent =
-    Boolean(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN) ||
-    process.env.OPTLE_FORCE_AGENT === "1";
+  // Output directory (random suffix if `optimized/` already exists).
+  const outName = existsSync(join(base, "optimized")) ? `optimized-${randomBytes(3).toString("hex")}` : "optimized";
+  const outAbs = join(base, outName);
+
+  const useAgent = Boolean(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN) || process.env.OPTLE_FORCE_AGENT === "1";
   const engine = useAgent ? "claude" : "mock";
   const model = process.env.OPTLE_MODEL || "claude-sonnet-4-6";
-  console.log(`[runner] engine=${engine}${useAgent ? ` model=${model}` : ""} files=${files.length} foundry=${Boolean(root)}`);
+  console.log(`[runner] engine=${engine}${useAgent ? ` model=${model}` : ""} files=${files.length} foundry=${Boolean(root)} out=${outName}`);
 
   let changes = [];
   let agentMeta;
-  const originals = new Map(files.map((f) => [f, readFileSync(f, "utf8")]));
-
   if (useAgent) {
-    agentMeta = await runAgent(base, model);
-    changes = parseReportChanges(base); // agent writes the report itself
+    agentMeta = await runAgent(base, model, outName);
+    changes = parseReportChanges(base);
   } else {
     for (const f of files) {
-      const before = originals.get(f);
-      const { out, changes: cs } = optimizeSource(before);
-      if (out !== before) writeFileSync(f, out);
+      const { out, changes: cs } = optimizeSource(originals.get(f));
+      const dest = join(outAbs, relative(base, f));
+      mkdirSync(dirname(dest), { recursive: true });
+      writeFileSync(dest, out);
       changes.push(...cs);
     }
   }
 
-  // verify + re-measure
-  let verified = false;
-  let gasAfter = 0;
-  if (root) {
-    const build = tryForge("forge build", root);
-    const test = build.ok ? tryForge("forge test --gas-report", root) : build;
-    if (build.ok && test.ok) {
-      gasAfter = totalGas(test.out);
-      verified = true;
-    } else if (!useAgent) {
-      for (const [f, src] of originals) writeFileSync(f, src); // mock: revert breakage
+  // Restore any in-place edits the agent may have made → src/ pristine.
+  for (const [f, src] of originals) writeFileSync(f, src);
+
+  // Verify + measure: temporarily swap optimized files into the source tree.
+  let verified = false, gasAfter = 0;
+  if (root && gasBefore > 0) {
+    const swapped = [];
+    for (const f of files) {
+      const opt = optimizedFor(base, outAbs, f);
+      if (opt) { writeFileSync(f, readFileSync(opt, "utf8")); swapped.push(f); }
     }
+    if (swapped.length) {
+      const build = tryForge("forge build", root);
+      const test = build.ok ? tryForge("forge test --gas-report", root) : build;
+      if (build.ok && test.ok) { gasAfter = totalGas(test.out); verified = true; }
+    }
+    for (const [f, src] of originals) writeFileSync(f, src); // restore again
   }
 
-  // savings
   let savedPct;
-  if (gasBefore > 0 && gasAfter > 0) {
-    savedPct = Number((((gasBefore - gasAfter) / gasBefore) * 100).toFixed(1));
-  } else {
-    const applied = changes.filter((c) => c.kind === "applied").reduce((n, c) => n + c.count, 0);
-    const detected = changes.filter((c) => c.kind === "detected").reduce((n, c) => n + c.count, 0);
-    savedPct = Number((Math.min(0.35, applied * 0.02 + detected * 0.03) * 100).toFixed(1));
+  if (verified && gasBefore > 0) savedPct = Number((((gasBefore - gasAfter) / gasBefore) * 100).toFixed(1));
+  else {
+    const applied = changes.filter((c) => c.kind !== "detected").reduce((n, c) => n + (c.count || 1), 0);
+    savedPct = Number((Math.min(0.35, applied * 0.02) * 100).toFixed(1));
   }
 
   const message = verified
-    ? `Optimized with ${engine === "claude" ? "Claude" : "the mock pass"} and verified with Foundry tests.`
-    : `Optimized with ${engine === "claude" ? "Claude" : "the mock pass"}; Foundry verification unavailable.`;
+    ? `Optimized with ${engine === "claude" ? "Claude" : "the mock pass"} into ${outName}/ and verified with Foundry tests.`
+    : `Optimized with ${engine === "claude" ? "Claude" : "the mock pass"} into ${outName}/; Foundry verification unavailable.`;
 
-  const result = {
-    ok: true,
-    engine,
-    verified,
-    gasBefore: gasBefore || undefined,
-    gasAfter: gasAfter || undefined,
-    savedPct,
-    changes,
-    costUsd: agentMeta?.cost,
-    message,
-  };
-  writeResult(result);
-  // For the agent, the report already exists; only (re)write for the mock engine
-  // or if the agent failed to produce one.
-  if (!useAgent || !existsSync(join(base, "OPTIMIZATION_REPORT.md"))) {
-    writeReport(base, { changes, gasBefore, gasAfter, savedPct, verified, message });
+  writeResult({
+    ok: true, engine, verified, outDir: outName,
+    gasBefore: gasBefore || undefined, gasAfter: gasAfter || undefined,
+    savedPct, changes, costUsd: agentMeta?.cost, message,
+  });
+  if (!existsSync(join(base, "OPTIMIZATION_REPORT.md"))) {
+    writeReport(base, { changes, gasBefore, gasAfter, savedPct, verified, message, outName });
   }
 }
 
 main().catch((err) => {
-  // Surface the real cause in the server's docker logs (not just the json).
   console.error("[runner] FATAL:", err?.stack || String(err));
   writeResult({ ok: false, verified: false, engine: "error", message: `runner error: ${String(err)}` });
   process.exitCode = 1;
