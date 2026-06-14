@@ -7,8 +7,9 @@ out/
 cache/
 *.tsbuildinfo
 
-# foundry
+# foundry (vendored deps — restore with `forge install`)
 **/lib/forge-std/
+**/lib/openzeppelin-contracts/
 broadcast/
 
 # env / secrets
