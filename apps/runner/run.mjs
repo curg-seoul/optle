@@ -161,11 +161,19 @@ function parseReportChanges(base) {
   const changes = [];
   let inChanges = false;
   for (const line of lines) {
-    if (/^##\s/.test(line)) { inChanges = /changes/i.test(line); continue; }
+    if (/^#{1,6}\s/.test(line)) { inChanges = /change|optimi/i.test(line); continue; }
     if (inChanges) {
-      const m = line.match(/^\s*[-*]\s+(.*)$/);
-      if (m && m[1].trim()) changes.push({ rule: "agent", kind: "applied", count: 1, description: m[1].trim() });
+      // bullets ("- x"), numbered ("1. x"), or table rows ("| x | ... |")
+      const m = line.match(/^\s*(?:[-*]|\d+\.)\s+(.*)$/) || line.match(/^\s*\|\s*([^|]+?)\s*\|/);
+      const desc = m?.[1]?.replace(/\*\*/g, "").trim();
+      if (desc && !/^-+$/.test(desc) && !/^(change|optimization)s?$/i.test(desc)) {
+        changes.push({ rule: "agent", kind: "applied", count: 1, description: desc });
+      }
     }
+  }
+  // Fallback so the UI isn't empty when the agent used prose/tables we couldn't parse.
+  if (changes.length === 0 && existsSync(p)) {
+    changes.push({ rule: "agent", kind: "applied", count: 1, description: "See OPTIMIZATION_REPORT.md for details." });
   }
   return changes;
 }
@@ -208,7 +216,7 @@ async function main() {
     if (report.ok) gasBefore = totalGas(report.out);
   }
 
-  const useAgent = Boolean(process.env.ANTHROPIC_API_KEY);
+  const useAgent = Boolean(process.env.ANTHROPIC_API_KEY) || process.env.OPTLE_FORCE_AGENT === "1";
   const engine = useAgent ? "claude" : "mock";
   const model = process.env.OPTLE_MODEL || "claude-sonnet-4-6";
   console.log(`[runner] engine=${engine}${useAgent ? ` model=${model}` : ""} files=${files.length} foundry=${Boolean(root)}`);
@@ -277,6 +285,8 @@ async function main() {
 }
 
 main().catch((err) => {
+  // Surface the real cause in the server's docker logs (not just the json).
+  console.error("[runner] FATAL:", err?.stack || String(err));
   writeResult({ ok: false, verified: false, engine: "error", message: `runner error: ${String(err)}` });
   process.exitCode = 1;
 });
