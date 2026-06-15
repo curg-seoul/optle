@@ -12,6 +12,7 @@ RUN npm ci
 
 COPY tsconfig.json ./
 COPY src ./src
+COPY demo ./demo
 
 EXPOSE 8080
 CMD ["npm", "run", "start"]

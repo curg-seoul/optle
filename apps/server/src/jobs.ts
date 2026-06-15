@@ -5,6 +5,10 @@ import AdmZip from "adm-zip";
 import { config } from "./config.js";
 import { inputKey, outputKey, getToFile, putFile } from "./cos.js";
 import type { ProjectSizing } from "./pricing.js";
+import { DEMO_LOG_LINES, loadDemoResult } from "./demo.js";
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const rand = (min: number, max: number) => min + Math.floor(Math.random() * (max - min));
 
 /**
  * In-memory job store + orchestration of the isolated optimization runner.
@@ -29,10 +33,14 @@ export type JobStage =
 export interface RunnerResult {
   ok: boolean;
   verified: boolean;
+  engine?: string;
+  outDir?: string;
   gasBefore?: number;
   gasAfter?: number;
   savedPct?: number;
   changes?: { rule: string; kind: string; description: string; count: number }[];
+  diffs?: { file: string; diff: string }[];
+  costUsd?: number;
   message?: string;
 }
 
@@ -147,6 +155,31 @@ export async function runJob(id: string): Promise<void> {
   job.status = "running";
   const jobRoot = join(config.runner.jobsDir, id);
   const setStage = (s: JobStage) => { job.stage = s; log(job, `── ${s} ──`); };
+
+  // Demo mode: no Docker / Claude / COS — replay a scripted agent run against the
+  // bundled artifact, streaming logs with a random per-line delay.
+  if (config.runner.demo) {
+    try {
+      setStage("downloading");
+      await sleep(rand(600, 1300));
+      setStage("optimizing");
+      for (const line of DEMO_LOG_LINES) {
+        await sleep(rand(1000, 3000)); // 1–3s per line
+        log(job, line);
+      }
+      setStage("packaging");
+      await sleep(rand(700, 1400));
+      job.result = loadDemoResult();
+      setStage("complete");
+      job.status = "done";
+    } catch (err) {
+      job.status = "error";
+      job.error = err instanceof Error ? err.message : String(err);
+      log(job, `✗ error: ${job.error}`);
+      console.error(`[job ${id}] demo failed:`, job.error);
+    }
+    return;
+  }
 
   try {
     // 1) fetch + unzip input

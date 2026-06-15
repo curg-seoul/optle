@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { writeFileSync, rmSync } from "node:fs";
+import { writeFileSync, rmSync, createReadStream } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import express from "express";
@@ -9,6 +9,7 @@ import { paymentGate } from "./x402.js";
 import { priceZip } from "./pricing.js";
 import { cosEnabled, inputKey, outputKey, putFile, presignedGetUrl } from "./cos.js";
 import { createJob, getJob, runJob } from "./jobs.js";
+import { DEMO_ZIP_PATH } from "./demo.js";
 
 const app = express();
 // Behind Caddy (and Netlify's proxy): read X-Forwarded-Proto/Host so the 402
@@ -50,7 +51,8 @@ app.get("/health", (_req, res) => {
  * the size-based price, returned so the UI can show the amount before payment.
  */
 app.post("/api/upload", upload.single("project"), async (req, res) => {
-  if (!cosEnabled) {
+  // Demo mode uses the bundled artifact, so COS isn't required.
+  if (!cosEnabled && !config.runner.demo) {
     res.status(503).json({ error: "storage not configured (COS_* env missing)" });
     return;
   }
@@ -69,7 +71,7 @@ app.post("/api/upload", upload.single("project"), async (req, res) => {
       res.status(400).json({ error: "no Solidity (.sol) source files found in the zip" });
       return;
     }
-    await putFile(inputKey(jobId), tmp);
+    if (!config.runner.demo) await putFile(inputKey(jobId), tmp); // demo ignores the upload
     createJob(jobId, sizing, level);
     res.json({
       jobId,
@@ -139,12 +141,24 @@ app.get("/api/download/:jobId", async (req, res) => {
     res.status(409).json({ error: `job not ready (status: ${job.status})` });
     return;
   }
+  // Demo mode serves the bundled artifact instead of a COS presigned URL.
+  if (config.runner.demo) {
+    res.json({ url: `${req.protocol}://${req.get("host")}/api/demo-download` });
+    return;
+  }
   try {
     const url = await presignedGetUrl(outputKey(job.id));
     res.json({ url });
   } catch (err) {
     res.status(500).json({ error: "could not sign download url", detail: String(err) });
   }
+});
+
+// Demo mode: stream the bundled optimized project zip as a download.
+app.get("/api/demo-download", (_req, res) => {
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", 'attachment; filename="optle-optimized.zip"');
+  createReadStream(DEMO_ZIP_PATH).pipe(res).on("error", () => res.status(500).end());
 });
 
 app.listen(config.port, () => {
@@ -168,6 +182,9 @@ app.listen(config.port, () => {
   console.log(`  engine:      ${engine}`);
   console.log(`  verify:      Level 1 always skips forge; Level 2 ${config.runner.verify ? "runs the full Foundry test/gas loop" : "skips forge too (fast mode)"}`);
 
+  if (config.runner.demo) {
+    console.warn("  🎬 OPTLE_DEMO=1 — optimize step is MOCKED (scripted logs + bundled artifact). Payment stays real.");
+  }
   if (config.payment.mode === "bypass") {
     console.warn("  ⚠️  PAYMENT_MODE=bypass — x402 gate is OFF (local demo only).");
   }

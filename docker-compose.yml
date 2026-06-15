@@ -17,6 +17,9 @@ services:
       - ./apps/server/.env
     environment:
       PAYMENT_MODE: enforce
+      # demo branch: mock the optimize step (scripted logs + bundled artifact).
+      # Payment stays real. Remove this to run the real Docker/Claude pipeline.
+      OPTLE_DEMO: "1"
       # Per-job working dirs. JOBS_DIR is this container's view; HOST_JOBS_DIR is
       # the SAME path on the host, so `docker run -v` (sibling runner) resolves it.
       JOBS_DIR: /jobs

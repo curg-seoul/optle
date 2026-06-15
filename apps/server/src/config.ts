@@ -51,6 +51,10 @@ export const config = {
     // forge test/fuzz too (fast mode, no verified gas). LEVEL 1 NEVER runs forge
     // regardless — it applies a few safe source-level transforms in one pass.
     verify: (process.env.OPTLE_VERIFY ?? "on") !== "off",
+    // Demo mode (OPTLE_DEMO=1): skip Docker/Claude/COS and replay a scripted
+    // agent run against the bundled artifact (apps/server/demo) — for recording
+    // the demo video. Payment stays real; only the optimize step is mocked.
+    demo: process.env.OPTLE_DEMO === "1",
     // Where the server keeps per-job working dirs (mounted into this container).
     jobsDir: process.env.JOBS_DIR ?? "/jobs",
     // The SAME directory's path on the Docker host, so `docker run -v` resolves
