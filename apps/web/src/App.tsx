@@ -51,6 +51,24 @@ function LogPanel({ logs }: { logs?: string[] }) {
   );
 }
 
+function Changes({ changes }: { changes?: { rule: string; kind: string; description: string; count: number }[] }) {
+  const applied = (changes ?? []).filter((c) => c.kind !== "detected");
+  if (applied.length === 0) return null;
+  return (
+    <div className="changes">
+      <h3>Optimizations Applied</h3>
+      <ul>
+        {applied.map((c, i) => (
+          <li key={i} className="change-row">
+            <span className="change-count">×{c.count}</span>
+            <span className="change-desc">{c.description}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function DiffView({ diffs }: { diffs?: { file: string; diff: string }[] }) {
   if (!diffs || diffs.length === 0) return null;
   return (
@@ -332,6 +350,8 @@ export function App() {
                   {result.message}
                 </p>
               )}
+
+              <Changes changes={result.changes} />
 
               <DiffView diffs={result.diffs} />
 
