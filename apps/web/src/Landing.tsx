@@ -3,11 +3,13 @@ import { ThemeToggle } from "./theme";
 
 export function Logo({ size = 32 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden>
-      <rect x="4" y="4" width="24" height="24" rx="6" stroke="var(--accent)" strokeWidth="2.5" />
-      <path d="M12 10L12 22M12 10L20 10M12 16L18 16" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" />
-      <circle cx="22" cy="22" r="3" fill="var(--accent)" />
-    </svg>
+    <img
+      src="/favicon.png"
+      width={size}
+      height={size}
+      alt="Optle"
+      style={{ objectFit: "contain", display: "block" }}
+    />
   );
 }
 
