@@ -151,7 +151,7 @@ app.listen(config.port, () => {
   const p = config.payment;
   console.log(`optle optimize server → http://localhost:${config.port}`);
   console.log(`  network:     ${p.network} (chainId ${p.chainId})`);
-  console.log(`  pricing:     tier-based (0.01 / 0.05 / 0.2 ${p.symbol}), paid in native ${p.symbol}`);
+  console.log(`  pricing:     tier-based (1 / 5 / 10 ${p.symbol}), paid in native ${p.symbol}`);
   console.log(`  pay to:      ${p.payTo}`);
   console.log(`  rpc:         ${p.rpcUrl} (verifies payment tx on-chain)`);
   console.log(`  COS:         ${cosEnabled ? `${config.cos.bucket} (${config.cos.region})` : "NOT configured"}`);

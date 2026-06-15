@@ -80,8 +80,8 @@ the exact before/after comparison — no trust required.
 - **Mantle builders:** lowers the barrier to shipping cheaper contracts without
   hand-auditing every SLOAD.
 
-Pricing scales with project size (from the uploaded `.zip`): **0.01 / 0.05 / 0.2
-MNT** (small / medium / large), injected into the 402 challenge per job.
+Pricing scales with project size (from the uploaded `.zip`): **1 / 5 / 10 MNT**
+(small / medium / large), injected into the 402 challenge per job.
 
 ## Demo
 

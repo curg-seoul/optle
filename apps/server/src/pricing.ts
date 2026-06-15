@@ -36,12 +36,11 @@ function isPricedSolidity(entryName: string): boolean {
   return true;
 }
 
-// Price per tier in native MNT (testnet). Tweak here. Kept small so a single
-// Mantle Sepolia faucet drip covers any tier.
+// Price per tier in native MNT (testnet). Tweak here.
 const PRICE_BY_TIER: Record<Tier, number> = {
-  small: 0.01,
-  medium: 0.05,
-  large: 0.2,
+  small: 1,
+  medium: 5,
+  large: 10,
 };
 
 /** Convert a MNT amount (≤3 decimals) to wei without float error. */
