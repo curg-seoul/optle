@@ -31,6 +31,24 @@ src/Token.sol            <- human-maintained source of truth (untouched)
 optimized/Token.sol      <- generated, deployed; same external interface
 ```
 
+## Comments: preserve, don't annotate
+
+The optimized file must read like clean, hand-written code — not an annotated
+worksheet. Two hard rules:
+
+- **Preserve the original comments.** Keep the developer's NatSpec, section
+  headers, and inline comments as-is. Do not delete or rewrite them. The diff
+  should be code-only wherever possible.
+- **Never annotate which optimization you applied.** Do NOT add comments like
+  `// Pattern A`, `// cache SLOAD`, `// custom error saves gas`, or rationale notes
+  next to changed lines. No tags, no letters, no "saves ~2100 gas" annotations in
+  the source. Put the explanation in `OPTIMIZATION_REPORT.md` instead — never in
+  the contract.
+
+If a transform genuinely needs a one-line code comment to stay readable (rare),
+write it in the neutral voice the rest of the file uses — not as an optimization
+label.
+
 Two optimization levels, chosen by the user. **The level decides whether forge runs at all:**
 
 - **Level 1 (default)** — function bodies only, applied as a FAST single pass with **no forge

@@ -123,6 +123,9 @@ function l1Prompt(outName) {
     `never-reassigned values, \`public\`->\`external\`, \`calldata\` for read-only params, and ` +
     `\`require\`-string -> custom error. A handful of edits is enough — do not over-optimize, and ` +
     `do NOT repack structs or resize field types. ` +
+    `PRESERVE the original comments verbatim (NatSpec, section headers, inline notes) and do NOT add ` +
+    `any comment naming the optimization or pattern you applied (no "// Pattern A", no "saves gas" ` +
+    `notes) — the optimized file must read like clean code, with explanations only in the report. ` +
     `Write the optimized variants into the \`${outName}/\` directory, mirroring the original source ` +
     `layout (e.g. src/Foo.sol -> ${outName}/src/Foo.sol); do NOT modify the originals. ` +
     `Do NOT run forge at all — no \`forge build\`, \`forge test\`, snapshot, or fuzz — and do NOT ` +
@@ -148,6 +151,9 @@ function l2Prompt(outName, verify) {
     `smaller integer types, bitmaps, UDVTs — because this is a fresh new deployment with no proxy. ` +
     `Preserve the EXTERNAL interface exactly (function signatures, visibility-as-callable, events, ` +
     `return shapes); custom errors are encouraged. ` +
+    `PRESERVE the original comments verbatim and do NOT add any comment naming the optimization or ` +
+    `pattern you applied (no "// Pattern A", no "saves gas" notes) — put explanations only in the ` +
+    `report, never in the contract. ` +
     `Write the optimized variants into the \`${outName}/\` directory, mirroring the original source ` +
     `layout (e.g. src/Foo.sol -> ${outName}/src/Foo.sol); do NOT modify the originals. ` +
     `${verifyText}Then write OPTIMIZATION_REPORT.md at the project root.`

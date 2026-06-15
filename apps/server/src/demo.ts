@@ -15,7 +15,7 @@ import type { RunnerResult } from "./jobs.js";
 
 const DEMO_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "demo");
 
-export const DEMO_ZIP_PATH = join(DEMO_DIR, "output.zip");
+export const DEMO_ZIP_PATH = join(DEMO_DIR, "optimized-project.zip");
 
 export function loadDemoResult(): RunnerResult {
   return JSON.parse(readFileSync(join(DEMO_DIR, "result.json"), "utf8")) as RunnerResult;
@@ -36,13 +36,15 @@ export const DEMO_LOG_LINES: string[] = [
   "[agent] · Read: /work/src/Airdrop.sol",
   "[agent] · Read: /work/src/StakingPool.sol",
   "[agent] · Read: /work/foundry.toml",
-  "[agent] Both contracts read. These are deliberately inefficient — long require strings, mapping<bool> flags, and loops that re-read storage and array length each iteration.",
-  "[agent] Level 1 plan (no storage-layout or ABI changes): constant/immutable, cached SLOADs, custom errors, calldata params, public→external, unchecked loop counters.",
-  "[agent] Airdrop.sol — name/claimFeeBps → constant, owner → immutable; setAllocations params memory → calldata; require strings → custom errors; hoist totalAllocated SLOAD/SSTORE out of the loop; cache length + unchecked {++i}.",
-  "[agent] · Write: optimized/src/Airdrop.sol",
-  "[agent] StakingPool.sol — cache rewardPerToken / lastUpdateTime SLOADs in the reward path; public → external; named return variables; custom errors; unchecked loop counters; drop zero-init.",
-  "[agent] · Write: optimized/src/StakingPool.sol",
-  "[agent] Writing the optimization report.",
-  "[agent] · Write: OPTIMIZATION_REPORT.md",
-  "[agent] Done — applied Level 1 gas optimizations to 2 contracts. Originals under src/ are untouched; the optimized build is in optimized/.",
+  "[agent] Let me check the test files to note any revert message dependencies before writing the optimized contracts.",
+  "[agent] · Read: /work/test/Airdrop.t.sol",
+  "[agent] · Read: /work/test/StakingPool.t.sol",
+  "[agent] Good — both test suites use bare `vm.expectRevert()` (no selector check), so custom errors won't break them. The `memory` → `calldata` param change is transparent at the ABI layer. Now I'll write the optimized contracts and report.",
+  "[agent] · Write: /work/optimized/src/Airdrop.sol",
+  "[agent] · Write: /work/optimized/src/StakingPool.sol",
+  "[agent] Now run a single `forge build` to confirm compilation.",
+  "[agent] · Bash: forge build --root . --contracts optimized/src 2>&1",
+  "[agent] Compiles cleanly. The two warnings are in the original test files (not our code). Now write the report.",
+  "[agent] · Write: /work/OPTIMIZATION_REPORT.md",
+  "[agent] All done — Level 1 transforms applied to both contracts: constant/immutable config, custom errors, calldata params, public→external, cached SLOADs hoisted out of loops, O(n)→O(1) membership lookups, unchecked loop counters. Original comments preserved; storage layout and external ABI unchanged.",
 ];
