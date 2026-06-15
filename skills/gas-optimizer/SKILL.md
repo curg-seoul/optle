@@ -31,23 +31,41 @@ src/Token.sol            <- human-maintained source of truth (untouched)
 optimized/Token.sol      <- generated, deployed; same external interface
 ```
 
-Two optimization levels, chosen by the user:
+Two optimization levels, chosen by the user. **The level decides whether forge runs at all:**
 
-- **Level 1 (default)** — function bodies only. Storage layout AND external interface
-  (function signatures, events, view return shapes) are preserved byte-for-byte. Safe because
-  nothing about where state lives changes.
-- **Level 2 (opt-in)** — external interface still preserved, but internal storage structure
-  may be redesigned (slot packing, bitmaps, UDVTs, data-structure swaps). Higher payoff,
-  higher risk. **New-deployment only** — changing storage layout collides with any already
-  deployed proxy.
+- **Level 1 (default)** — function bodies only, applied as a FAST single pass with **no forge
+  invocation** (no `forge build`/`test`/`snapshot`/fuzz) and **no per-transform verification
+  loop**. Storage layout AND external interface (function signatures, events, view return shapes)
+  are preserved byte-for-byte. Its safety comes from restricting to the provably-safe staple
+  refactors below — none of which remove a runtime check — so the verification gate is not
+  required. Use this for quick/demo runs and to keep cost and latency low.
+- **Level 2 (opt-in)** — external interface still preserved, but internal storage structure may
+  be redesigned (slot packing, bitmaps, UDVTs, data-structure swaps). Higher payoff, higher risk,
+  so it runs through the full verification gate below. **New-deployment only** — changing storage
+  layout collides with any already deployed proxy.
 
-If the user has not said which level, ask. Default to Level 1 if they just say "optimize".
+If the user has not said which level, default to Level 1.
 
-## The non-negotiable verification gate
+### Level 1 staple transforms (safe, no gate needed)
 
-Gas optimization that is not verified is worthless and dangerous: inline assembly silently
-breaks on edge cases (dirty bits, overflow, signed values, bounds), and the optimized code is
-deployed without a human reading it. So EVERY transform must pass this gate or be discarded:
+Apply only these source-level, behaviour-preserving refactors, and only where they clearly fit —
+a handful of edits is enough, do not over-optimize:
+
+- cache repeated SLOADs into a local; hoist invariants and cache array `length` out of loops
+- `unchecked {++i}` loop counters and `++i` over `i++`
+- `constant`/`immutable` for never-reassigned values
+- `public` → `external` where not called internally; `calldata` for read-only reference params
+- `require(cond, "msg")` → custom error
+- drop redundant zero-initialization (`uint x = 0;` → `uint x;`)
+
+Do NOT repack structs, resize field types, change storage slots, or write inline assembly at
+Level 1 — those belong to Level 2, behind the gate.
+
+## The verification gate (Level 2)
+
+Level 2 changes storage layout and may use assembly, which silently breaks on edge cases (dirty
+bits, overflow, signed values, bounds) and is deployed without a human reading it. So at Level 2,
+EVERY transform must pass this gate or be discarded:
 
 1. **Behavior**: the contract's existing unit-test suite passes against the optimized version,
    unchanged. The tests are the spec. If the user's tests are thin, the safety guarantee is
@@ -59,7 +77,7 @@ deployed without a human reading it. So EVERY transform must pass this gate or b
 Apply transforms one at a time and re-run the gate after each. Keep a transform only if both
 conditions hold. This per-transform loop is what makes the output trustworthy.
 
-**`gas snapshot 통과 + 테스트 통과`가 동시에 만족될 때만 변경을 채택한다. 둘 중 하나라도 실패하면 롤백한다.**
+**Level 2에서는 `gas snapshot 통과 + 테스트 통과`가 동시에 만족될 때만 변경을 채택한다. 둘 중 하나라도 실패하면 롤백한다.**
 
 ### When unit tests are not enough
 
@@ -77,15 +95,29 @@ redesign is hard to pin down with example-based tests alone. Offer to generate a
 fuzz harness: deploy original and optimized side by side, fuzz every external function, assert
 equal return values / state / events.
 
-## Workflow
+## Workflow — Level 1 (default, fast)
 
-1. **Read the target contract.** Identify external interface (functions, events, view returns)
-   — this is the contract that must be preserved. Locate the existing test suite. If there is
-   no test suite, stop and tell the user: without tests there is no verification gate, so the
-   output cannot be trusted. Offer to help write tests first.
+1. **Read the target contracts** under `src/` and note their external interface (it must be
+   preserved). No test suite is required at Level 1 — the staple transforms don't remove checks.
 
-2. **Confirm level and scope.** Level 1 or Level 2. Confirm new-deployment (this skill does not
-   do proxy storage-collision analysis). Confirm the output directory.
+2. **Apply the Level 1 staple transforms in a single pass**, only where they clearly fit (see the
+   list above). A handful of well-chosen edits is enough; do not over-optimize and do not write
+   assembly. **Do NOT run forge** (`build`/`test`/`snapshot`/fuzz) and do NOT iterate — Level 1 is
+   meant to be fast and cheap.
+
+3. **Write the optimized variants** into the output directory (mirroring the source layout; never
+   edit the originals), then write a short `OPTIMIZATION_REPORT.md` listing what changed and why.
+
+## Workflow — Level 2 (opt-in, verified)
+
+1. **Read the target contract.** Identify the external interface (functions, events, view
+   returns) — this must be preserved. Locate the existing test suite. If there is no test suite,
+   stop and tell the user: without tests there is no verification gate, so a Level 2 (storage
+   redesign / assembly) output cannot be trusted. Offer to help write tests first, or fall back
+   to Level 1.
+
+2. **Confirm scope.** Confirm new-deployment (this skill does not do proxy storage-collision
+   analysis) and the output directory.
 
 3. **Find candidate hotspots, ranked by expected payoff.** Do not apply assembly everywhere —
    the compiler already optimizes simple operations well, and blanket assembly adds risk for no

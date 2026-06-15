@@ -36,12 +36,17 @@ function isPricedSolidity(entryName: string): boolean {
   return true;
 }
 
-// Price per tier in native MNT (testnet). Tweak here.
+// Base price per tier in native MNT (testnet) — this is the Level 1 (Standard)
+// price. Tweak here.
 const PRICE_BY_TIER: Record<Tier, number> = {
   small: 1,
   medium: 5,
   large: 10,
 };
+
+// Level 2 (Aggressive) does deeper work (storage redesign + forge verification
+// loop), so it costs more: the base tier price × this multiplier.
+const LEVEL2_PRICE_MULTIPLIER = 3;
 
 /** Convert a MNT amount (≤3 decimals) to wei without float error. */
 function mntToWei(mnt: number): string {
@@ -57,8 +62,11 @@ function pickTier(solFiles: number, totalBytes: number): Tier {
   return "large";
 }
 
-/** Inspect a .zip on disk and compute its tier + price. */
-export function priceZip(zipPath: string): ProjectSizing {
+/**
+ * Inspect a .zip on disk and compute its tier + price. The price is the tier's
+ * base (Level 1 / Standard) price, multiplied for Level 2 (Aggressive).
+ */
+export function priceZip(zipPath: string, level: 1 | 2 = 1): ProjectSizing {
   const zip = new AdmZip(zipPath);
   let solFiles = 0;
   let totalBytes = 0;
@@ -71,6 +79,6 @@ export function priceZip(zipPath: string): ProjectSizing {
   }
 
   const tier = pickTier(solFiles, totalBytes);
-  const priceMnt = PRICE_BY_TIER[tier];
+  const priceMnt = PRICE_BY_TIER[tier] * (level === 2 ? LEVEL2_PRICE_MULTIPLIER : 1);
   return { solFiles, totalBytes, tier, priceMnt, amountWei: mntToWei(priceMnt) };
 }

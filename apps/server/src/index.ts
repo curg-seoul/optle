@@ -63,13 +63,13 @@ app.post("/api/upload", upload.single("project"), async (req, res) => {
   const tmp = join(tmpdir(), `${jobId}.zip`);
   try {
     writeFileSync(tmp, req.file.buffer);
-    const sizing = priceZip(tmp);
+    const level = req.body?.level === "2" ? 2 : 1; // optimization depth (default 1)
+    const sizing = priceZip(tmp, level); // Level 2 (Aggressive) is priced higher
     if (sizing.solFiles === 0) {
       res.status(400).json({ error: "no Solidity (.sol) source files found in the zip" });
       return;
     }
     await putFile(inputKey(jobId), tmp);
-    const level = req.body?.level === "2" ? 2 : 1; // optimization depth (default 1)
     createJob(jobId, sizing, level);
     res.json({
       jobId,
@@ -151,7 +151,7 @@ app.listen(config.port, () => {
   const p = config.payment;
   console.log(`optle optimize server → http://localhost:${config.port}`);
   console.log(`  network:     ${p.network} (chainId ${p.chainId})`);
-  console.log(`  pricing:     tier-based (1 / 5 / 10 ${p.symbol}), paid in native ${p.symbol}`);
+  console.log(`  pricing:     tier-based (1 / 5 / 10 ${p.symbol}, ×3 for Level 2), paid in native ${p.symbol}`);
   console.log(`  pay to:      ${p.payTo}`);
   console.log(`  rpc:         ${p.rpcUrl} (verifies payment tx on-chain)`);
   console.log(`  COS:         ${cosEnabled ? `${config.cos.bucket} (${config.cos.region})` : "NOT configured"}`);
@@ -166,7 +166,7 @@ app.listen(config.port, () => {
   else if (hasKey) engine = "Claude (ANTHROPIC_API_KEY)";
   else engine = "mock (no ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN set)";
   console.log(`  engine:      ${engine}`);
-  console.log(`  verify:      ${config.runner.verify ? "on (full Foundry test/gas loop)" : "off (fast mode — verification skipped)"}`);
+  console.log(`  verify:      Level 1 always skips forge; Level 2 ${config.runner.verify ? "runs the full Foundry test/gas loop" : "skips forge too (fast mode)"}`);
 
   if (config.payment.mode === "bypass") {
     console.warn("  ⚠️  PAYMENT_MODE=bypass — x402 gate is OFF (local demo only).");

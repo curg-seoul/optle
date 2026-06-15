@@ -46,9 +46,10 @@ export const config = {
     // "mock": always run the offline mock optimizer (no AI cost) — use this on
     // the public site; unset/auto for the real-AI demo recording.
     engine: process.env.OPTLE_ENGINE ?? "auto",
-    // "on" (default): run the full Foundry verification loop (snapshot → test →
-    // re-measure). "off": apply optimizations only and skip forge test/fuzz —
-    // much faster, but no verified before/after gas (use during development).
+    // Applies to LEVEL 2 only. "on" (default): Level 2 runs the full Foundry
+    // verification loop (snapshot → test → re-measure). "off": Level 2 skips
+    // forge test/fuzz too (fast mode, no verified gas). LEVEL 1 NEVER runs forge
+    // regardless — it applies a few safe source-level transforms in one pass.
     verify: (process.env.OPTLE_VERIFY ?? "on") !== "off",
     // Where the server keeps per-job working dirs (mounted into this container).
     jobsDir: process.env.JOBS_DIR ?? "/jobs",

@@ -106,6 +106,54 @@ function optimizeSource(code) {
   return { out, changes };
 }
 
+/**
+ * Level 1 (default, fast/demo): a SMALL set of provably-safe source-level
+ * transforms in ONE pass, with NO forge invocation. The agent doesn't read the
+ * full corpus — it applies the staple refactors directly.
+ */
+function l1Prompt(outName) {
+  return (
+    `Use your solidity-gas-optimizer skill to apply LEVEL 1 gas optimizations to the Solidity ` +
+    `contracts under src/. Level 1 = a SMALL, high-confidence set of source-level, ` +
+    `behaviour-preserving edits that do NOT change the storage layout or the external interface ` +
+    `(function signatures, visibility-as-callable, events, return shapes). ` +
+    `You do NOT need to read the full pattern corpus — apply the safe staples directly where they ` +
+    `clearly apply: cache repeated SLOADs, cache array length + \`unchecked {++i}\` in loops, ` +
+    `\`++i\` over \`i++\`, drop redundant zero-initialization, \`constant\`/\`immutable\` for ` +
+    `never-reassigned values, \`public\`->\`external\`, \`calldata\` for read-only params, and ` +
+    `\`require\`-string -> custom error. A handful of edits is enough — do not over-optimize, and ` +
+    `do NOT repack structs or resize field types. ` +
+    `Write the optimized variants into the \`${outName}/\` directory, mirroring the original source ` +
+    `layout (e.g. src/Foo.sol -> ${outName}/src/Foo.sol); do NOT modify the originals. ` +
+    `Do NOT run forge at all — no \`forge build\`, \`forge test\`, snapshot, or fuzz — and do NOT ` +
+    `iterate a verification loop. Apply the transforms in a single pass, then write a short ` +
+    `OPTIMIZATION_REPORT.md at the project root listing what you changed.`
+  );
+}
+
+/**
+ * Level 2 (opt-in): storage redesign allowed + the full forge verification
+ * gate/loop (unless `verify` is false, i.e. OPTLE_VERIFY=off → fast mode).
+ */
+function l2Prompt(outName, verify) {
+  const verifyText = verify
+    ? `Verify with forge per the skill's verification gate: apply transforms one at a time, re-run ` +
+      `\`forge test\` + a gas snapshot after each, and KEEP a transform only if tests still pass and ` +
+      `gas drops (revert it otherwise). `
+    : `Skip the forge verification gate (fast mode) — a single \`forge build\` to confirm it compiles ` +
+      `is fine, nothing more. Apply the corpus transforms directly and be fast. `;
+  return (
+    `Use your solidity-gas-optimizer skill to apply LEVEL 2 gas optimizations to the Solidity ` +
+    `contracts under src/. You MAY redesign the internal storage layout — struct/slot packing, ` +
+    `smaller integer types, bitmaps, UDVTs — because this is a fresh new deployment with no proxy. ` +
+    `Preserve the EXTERNAL interface exactly (function signatures, visibility-as-callable, events, ` +
+    `return shapes); custom errors are encouraged. ` +
+    `Write the optimized variants into the \`${outName}/\` directory, mirroring the original source ` +
+    `layout (e.g. src/Foo.sol -> ${outName}/src/Foo.sol); do NOT modify the originals. ` +
+    `${verifyText}Then write OPTIMIZATION_REPORT.md at the project root.`
+  );
+}
+
 /** Real engine: run the Claude Agent SDK with the skill loaded natively. */
 async function runAgent(base, model, outName, level, verify) {
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
@@ -119,30 +167,13 @@ async function runAgent(base, model, outName, level, verify) {
     console.error(`[runner] skill source not found at ${SKILL_SRC}`);
   }
 
-  const levelText =
-    level === 2
-      ? `Apply LEVEL 2 optimizations: you MAY redesign the internal storage layout — struct/slot ` +
-        `packing, smaller integer types, bitmaps, UDVTs — because this is a fresh new deployment ` +
-        `with no proxy. Preserve the EXTERNAL interface exactly (function signatures, ` +
-        `visibility-as-callable, events, return shapes); custom errors are encouraged.`
-      : `Apply LEVEL 1 optimizations ONLY: function-body changes that do NOT alter the storage ` +
-        `layout or external interface — cache repeated SLOADs, hoist invariants and cache array ` +
-        `length out of loops, unchecked increments, ++i, constant/immutable for never-reassigned ` +
-        `values, public->external, calldata params, custom errors, drop redundant init/checks. ` +
-        `Do NOT repack structs, resize field types, or change any storage slot assignment.`;
+  const prompt = level === 2 ? l2Prompt(outName, verify) : l1Prompt(outName);
 
-  const verifyText = verify
-    ? `Verify with forge per the skill's verification gate (tests must pass and gas must drop), `
-    : `Do NOT run the skill's verification gate — SKIP \`forge test\` and fuzzing entirely (a ` +
-      `single \`forge build\` to confirm it compiles is fine, nothing more). Apply the transforms ` +
-      `from the pattern corpus directly and be fast, `;
-
-  const prompt =
-    `Use your solidity-gas-optimizer skill to optimize the Solidity contracts under src/. ` +
-    `${levelText} ` +
-    `Write the optimized variants into the \`${outName}/\` directory, mirroring the original ` +
-    `source layout (e.g. src/Foo.sol -> ${outName}/src/Foo.sol). Do NOT modify the original ` +
-    `files in place. ${verifyText}then write OPTIMIZATION_REPORT.md at the project root.`;
+  // Level 1 gets NO Bash → it structurally cannot invoke forge (keeps the run
+  // fast and the API input-token count low). Level 2 needs Bash for the gate.
+  const allowedTools = level === 2
+    ? ["Read", "Edit", "Write", "Bash", "Glob", "Grep", "Skill"]
+    : ["Read", "Edit", "Write", "Glob", "Grep", "Skill"];
 
   let cost = 0, turns = 0;
   for await (const msg of query({
@@ -152,7 +183,7 @@ async function runAgent(base, model, outName, level, verify) {
       model,
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
-      allowedTools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep", "Skill"],
+      allowedTools,
       systemPrompt: { type: "preset", preset: "claude_code" },
       settingSources: ["project"],
       skills: ["solidity-gas-optimizer"],
@@ -281,9 +312,12 @@ async function main() {
   // Snapshot originals so src/ is always restored pristine.
   const originals = new Map(files.map((f) => [f, readFileSync(f, "utf8")]));
 
-  // OPTLE_VERIFY=off → fast mode: apply optimizations only, skip the forge
-  // test/fuzz loop (no verified before/after gas).
-  const verifyMode = process.env.OPTLE_VERIFY !== "off";
+  // Level drives whether forge runs at all. Level 1 (default) NEVER invokes
+  // forge — it applies a few safe source-level transforms in one pass (fast,
+  // low-token, no verified gas). Level 2 runs the full forge verification
+  // gate/loop, unless OPTLE_VERIFY=off force-skips it (Level-2 fast mode).
+  const level = process.env.OPTLE_LEVEL === "2" ? 2 : 1;
+  const verifyMode = level === 2 && process.env.OPTLE_VERIFY !== "off";
 
   // Baseline gas on the originals (skipped in fast mode).
   let gasBefore = 0;
@@ -299,7 +333,6 @@ async function main() {
   const useAgent = Boolean(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN) || process.env.OPTLE_FORCE_AGENT === "1";
   const engine = useAgent ? "claude" : "mock";
   const model = process.env.OPTLE_MODEL || "claude-sonnet-4-6";
-  const level = process.env.OPTLE_LEVEL === "2" ? 2 : 1;
   console.log(`[runner] engine=${engine}${useAgent ? ` model=${model} level=${level}` : ""} verify=${verifyMode} files=${files.length} foundry=${Boolean(root)} out=${outName}`);
 
   let changes = [];

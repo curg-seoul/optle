@@ -45,8 +45,8 @@ Cyfrin Solodit** gas findings, not generic prompting. It works at two depths:
 
 | Level | Scope |
 |---|---|
-| **1** | Function-body only — cache SLOADs, custom errors, `unchecked`, `constant`/`immutable`, `public`→`external`, `calldata`. Storage layout unchanged. |
-| **2** | L1 **+** storage redesign — struct/slot packing, bitmaps, smaller types. New-deployment only. |
+| **1** (default) | Function-body only, applied in a fast single pass — cache SLOADs, custom errors, `unchecked`, `constant`/`immutable`, `public`→`external`, `calldata`. Storage layout unchanged. These staples are provably safe, so Level 1 skips forge entirely (no verification loop) to stay fast and cheap. |
+| **2** (opt-in) | L1 **+** storage redesign — struct/slot packing, bitmaps, smaller types. New-deployment only. Runs the full forge verification gate (test + gas snapshot, per transform). |
 
 **Safety is enforced, not promised.** The optimizer never weakens a check; it
 preserves the external interface (signatures, events, return shapes); and a
@@ -81,7 +81,8 @@ the exact before/after comparison — no trust required.
   hand-auditing every SLOAD.
 
 Pricing scales with project size (from the uploaded `.zip`): **1 / 5 / 10 MNT**
-(small / medium / large), injected into the 402 challenge per job.
+(small / medium / large) for Level 1, **×3** for Level 2 (the deeper, forge-verified
+pass), injected into the 402 challenge per job.
 
 ## Demo
 
@@ -110,8 +111,8 @@ cd apps/web && npm install && npm run dev   # http://localhost:5173
 The dev server proxies `/api` to a backend (`DEV_API_TARGET`, default localhost).
 The backend address is never hardcoded — configure via env (`VITE_API_BASE` for
 the deployed frontend, `API_DOMAIN` for Caddy, `OPTLE_ENGINE` for mock vs Claude,
-`OPTLE_VERIFY=off` for a fast no-Foundry-loop pass). Each app has a `.env.example`;
-full instructions in [DEPLOY.md](DEPLOY.md).
+`OPTLE_VERIFY=off` to skip forge in Level 2 too). Level 1 (the default) always runs
+forge-free. Each app has a `.env.example`; full instructions in [DEPLOY.md](DEPLOY.md).
 
 ## Tech
 
