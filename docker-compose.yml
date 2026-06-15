@@ -2,10 +2,10 @@
 # (Netlify) and calls this backend via VITE_API_BASE.
 #
 #   Caddy (auto-HTTPS for $API_DOMAIN)  -> server:8080
-#                                          -> facilitator:8090 (internal only)
 #
-# Only Caddy publishes ports (80/443). server + facilitator stay on the internal
-# compose network and are never exposed to the internet.
+# Only Caddy publishes ports (80/443). The server stays on the internal compose
+# network and is never exposed to the internet. Payment txs are verified on-chain
+# by the server itself via RPC_URL — no separate facilitator service.
 #
 # Set API_DOMAIN in the host env / a root .env. Secrets come from each app's .env
 # (copy them onto the VM before `up`).
@@ -16,8 +16,6 @@ services:
     env_file:
       - ./apps/server/.env
     environment:
-      # Override for the compose network: reach the facilitator by service name.
-      FACILITATOR_URL: http://facilitator:8090
       PAYMENT_MODE: enforce
       # Per-job working dirs. JOBS_DIR is this container's view; HOST_JOBS_DIR is
       # the SAME path on the host, so `docker run -v` (sibling runner) resolves it.
@@ -31,8 +29,6 @@ services:
       - /srv/optle-jobs:/jobs
     expose:
       - "8080"
-    depends_on:
-      - facilitator
 
   # Build-only: produces the `optle-runner` image the server spawns per job.
   # Not started by `up`. Build it with: docker compose --profile build build runner
@@ -42,15 +38,6 @@ services:
     build:
       context: .
       dockerfile: apps/runner/Dockerfile
-
-  facilitator:
-    build: ./apps/facilitator
-    restart: unless-stopped
-    env_file:
-      - ./apps/facilitator/.env
-    # No published ports — only `server` reaches it over the internal network.
-    expose:
-      - "8090"
 
   caddy:
     image: caddy:2-alpine

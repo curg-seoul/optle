@@ -69,8 +69,8 @@ function HeroArt() {
 
 const FEATURES = [
   {
-    title: "x402-Driven Gas Audit",
-    body: "Comprehensive gas optimization audits powered by the x402 protocol. Secure, automated, and settled on Mantle.",
+    title: "Pay-Per-Run Gas Audit",
+    body: "Comprehensive gas optimization audits gated by a single native-MNT micropayment. Secure, automated, and verified on Mantle.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
@@ -150,7 +150,7 @@ export function Landing() {
           <h1>Ship Cheaper Solidity.</h1>
           <p>
             Automatically optimize your smart contracts and verify savings with Foundry. 
-            Powered by AI, settled on Mantle via <span className="highlight-x402">x402</span>.
+            Powered by AI, paid per run in <span className="highlight-x402">native MNT</span> on Mantle.
           </p>
           <div className="hero-cta">
             <a className="btn-primary lg" href="/app" style={{ fontSize: '18px', padding: '16px 40px' }}>Start Optimizing →</a>
@@ -177,7 +177,7 @@ export function Landing() {
         <span className="how-arrow">→</span>
         <div className="how-step">
           <span className="how-n">2</span>
-          <span>Pay USDC <small>(via x402)</small></span>
+          <span>Pay MNT <small>(per run)</small></span>
         </div>
         <span className="how-arrow">→</span>
         <div className="how-step">

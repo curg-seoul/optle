@@ -1,82 +1,107 @@
 import type { Request, Response, NextFunction } from "express";
+import { createPublicClient, http, defineChain, type Hex } from "viem";
 import { config } from "./config.js";
 
 /**
- * Minimal, chain-agnostic x402 server gate.
- *
- * Why hand-rolled instead of `x402-express`: that package's `Network` is a fixed
- * zod enum that does NOT include Mantle, so it rejects Mantle Sepolia outright.
- * The x402 wire protocol itself is simple, so we drive it directly here and let
- * config.ts point us at any chain + facilitator.
+ * HTTP 402 payment gate, paid in the native token (MNT).
  *
  * Flow:
- *   - no X-PAYMENT header  → HTTP 402 with payment requirements
- *   - X-PAYMENT present    → facilitator /verify, then /settle, then next()
+ *   - no X-PAYMENT header → HTTP 402 with the payment requirements (payTo + amount)
+ *   - X-PAYMENT present    → the payer's tx hash; we verify on-chain (via the RPC)
+ *     that the tx is mined & successful, went to `payTo`, and sent >= `amount`,
+ *     then next()
  *
- * NOTE: real verify/settle needs a facilitator that supports the configured
- * network and a funded EIP-3009 payment. Untested here by design.
+ * Native MNT can't use EIP-3009 (no contract / no gasless authorization), so the
+ * payer sends a real transfer and we read it back from the chain — no separate
+ * facilitator or relayer. Each tx hash is single-use.
  */
 
 const X402_VERSION = 1;
 
-function buildRequirements(req: Request, amountBaseUnits: string) {
+// Replay guard: a payment tx can only unlock one job.
+const usedTx = new Set<string>();
+
+// Read-only client on the payment chain, used to verify payment txs.
+const chain = defineChain({
+  id: config.payment.chainId,
+  name: config.payment.network,
+  nativeCurrency: { name: config.payment.symbol, symbol: config.payment.symbol, decimals: 18 },
+  rpcUrls: { default: { http: [config.payment.rpcUrl] } },
+});
+const publicClient = createPublicClient({ chain, transport: http(config.payment.rpcUrl) });
+
+function buildRequirements(req: Request, amountWei: string) {
   const p = config.payment;
   return {
-    scheme: "exact",
+    scheme: "native",
     network: p.network,
-    maxAmountRequired: amountBaseUnits,
+    chainId: p.chainId,
+    maxAmountRequired: amountWei, // wei
     resource: `${req.protocol}://${req.get("host")}${req.originalUrl}`,
-    description: "Optimize a single Solidity contract's gas usage",
-    mimeType: "application/json",
+    description: "Optimize a Solidity project's gas usage",
     payTo: p.payTo,
+    symbol: p.symbol,
+    decimals: p.decimals,
     maxTimeoutSeconds: p.maxTimeoutSeconds,
-    asset: p.asset.address,
-    outputSchema: { input: { type: "http", method: "POST", discoverable: true } },
-    // EIP-712 domain hints the client needs to sign the EIP-3009 authorization.
-    extra: { name: p.asset.name, version: p.asset.eip712Version },
   };
 }
 
-function send402(req: Request, res: Response, error: string, amountBaseUnits: string) {
+function send402(req: Request, res: Response, error: string, amountWei: string) {
   res.status(402).json({
     x402Version: X402_VERSION,
     error,
-    accepts: [buildRequirements(req, amountBaseUnits)],
+    accepts: [buildRequirements(req, amountWei)],
   });
 }
 
-async function facilitator(path: "/verify" | "/settle", body: unknown) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (config.facilitator.apiKey) {
-    headers.Authorization = `Bearer ${config.facilitator.apiKey}`;
-  }
-  const res = await fetch(`${config.facilitator.url}${path}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    throw new Error(`facilitator ${path} returned ${res.status}`);
-  }
-  return res.json() as Promise<any>;
+interface VerifyResult {
+  isValid: boolean;
+  invalidReason?: string;
+  transaction?: string;
+  payer?: string;
+  value?: string;
 }
 
 /**
- * Route-specific middleware factory: gate an endpoint behind x402 payment.
- *
- * `resolveAmount` returns the price (USDC base units) for this request — e.g.
- * the per-job tier price. If it returns undefined the resource is unknown (404).
- * Omit it to charge the static config price.
+ * Verify a native MNT payment tx on-chain: it must be mined & successful, have
+ * gone to `payTo`, and have sent at least `amountWei`.
+ */
+async function verifyPayment(txHash: Hex, payTo: string, amountWei: string): Promise<VerifyResult> {
+  let required: bigint;
+  try {
+    required = BigInt(amountWei);
+  } catch {
+    return { isValid: false, invalidReason: "invalid amountWei" };
+  }
+
+  const receipt = await publicClient.getTransactionReceipt({ hash: txHash }).catch(() => null);
+  if (!receipt) return { isValid: false, invalidReason: "payment tx not found or not yet mined" };
+  if (receipt.status !== "success") return { isValid: false, invalidReason: "payment tx reverted" };
+
+  const tx = await publicClient.getTransaction({ hash: txHash });
+  if (!tx.to || tx.to.toLowerCase() !== payTo.toLowerCase()) {
+    return { isValid: false, invalidReason: "payment was not sent to the expected address" };
+  }
+  if (tx.value < required) {
+    return { isValid: false, invalidReason: `payment too small (sent ${tx.value}, need ${required})` };
+  }
+
+  return { isValid: true, transaction: txHash, payer: tx.from, value: tx.value.toString() };
+}
+
+/**
+ * Route-specific middleware factory: gate an endpoint behind a native payment.
+ * `resolveAmount` returns the required amount in wei for this request (per-job
+ * tier price); undefined → unknown resource (404).
  */
 export function paymentGate(resolveAmount?: (req: Request) => string | undefined) {
   return async function gate(req: Request, res: Response, next: NextFunction) {
-    const amount = resolveAmount ? resolveAmount(req) : config.payment.amountBaseUnits;
-    if (amount === undefined) {
+    const amountWei = resolveAmount ? resolveAmount(req) : "0";
+    if (amountWei === undefined) {
       res.status(404).json({ error: "unknown job" });
       return;
     }
 
-    // Local-demo escape hatch: skip payment entirely (no facilitator needed).
     if (config.payment.mode === "bypass") {
       next();
       return;
@@ -84,44 +109,39 @@ export function paymentGate(resolveAmount?: (req: Request) => string | undefined
 
     const header = req.header("X-PAYMENT");
     if (!header) {
-      send402(req, res, "X-PAYMENT header is required", amount);
+      send402(req, res, "X-PAYMENT header is required (pay first)", amountWei);
       return;
     }
 
-    let paymentPayload: unknown;
+    let payload: { txHash?: string };
     try {
-      paymentPayload = JSON.parse(Buffer.from(header, "base64").toString("utf8"));
+      payload = JSON.parse(Buffer.from(header, "base64").toString("utf8"));
     } catch {
-      send402(req, res, "Invalid X-PAYMENT header (expected base64-encoded JSON)", amount);
+      send402(req, res, "Invalid X-PAYMENT header (expected base64-encoded JSON)", amountWei);
       return;
     }
 
-    const paymentRequirements = buildRequirements(req, amount);
+    const txHash = (payload.txHash ?? "").toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(txHash)) {
+      send402(req, res, "X-PAYMENT must contain a payment txHash", amountWei);
+      return;
+    }
+    if (usedTx.has(txHash)) {
+      send402(req, res, "this payment tx was already used", amountWei);
+      return;
+    }
 
     try {
-      const verify = await facilitator("/verify", {
-        x402Version: X402_VERSION,
-        paymentPayload,
-        paymentRequirements,
-      });
-      if (!verify?.isValid) {
-        send402(req, res, verify?.invalidReason ?? "payment verification failed", amount);
+      const verify = await verifyPayment(txHash as Hex, config.payment.payTo, amountWei);
+      if (!verify.isValid) {
+        send402(req, res, verify.invalidReason ?? "payment verification failed", amountWei);
         return;
       }
-
-      const settlement = await facilitator("/settle", {
-        x402Version: X402_VERSION,
-        paymentPayload,
-        paymentRequirements,
-      });
-      // Standard x402: hand the settlement receipt back to the client.
-      res.setHeader(
-        "X-PAYMENT-RESPONSE",
-        Buffer.from(JSON.stringify(settlement)).toString("base64"),
-      );
+      usedTx.add(txHash);
+      res.setHeader("X-PAYMENT-RESPONSE", Buffer.from(JSON.stringify(verify)).toString("base64"));
       next();
     } catch (err) {
-      res.status(502).json({ error: "facilitator error", detail: String(err) });
+      res.status(502).json({ error: "payment verification error", detail: String(err) });
     }
   };
 }

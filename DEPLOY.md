@@ -13,7 +13,7 @@ Browser ─https─▶ Netlify (static SPA)
                   │  /api/*, /health  → proxied to the backend (netlify.toml)
                   ▼
                 Caddy (auto-HTTPS) ── VM
-                  └─ server:8080 ── facilitator:8090 (internal) ── runner (per-job container)
+                  └─ server:8080 (verifies payment on-chain via RPC) ── runner (per-job container)
 ```
 
 ## 1. Object storage (required)
@@ -24,15 +24,14 @@ CORS needed — uploads go through the server, downloads use a presigned GET.
 ## 2. Backend (VM)
 
 1. VM: Ubuntu 22.04, 2 vCPU / 2–4 GB. Open inbound `22` (your IP), `80`, `443`
-   only — `8080`/`8090` stay internal to the compose network.
+   only — `8080` stays internal to the compose network.
 2. Install Docker: `curl -fsSL https://get.docker.com | sh`
 3. Point an A record for your API domain → VM public IP (Caddy needs it for a cert).
 4. Copy each `.env.example` to `.env` and fill it in (all gitignored):
    - root `.env` — `API_DOMAIN` (the domain Caddy serves and gets a cert for).
-   - `apps/server/.env` — `PAY_TO_ADDRESS`, `PAYMENT_ASSET_*`, `COS_*`, and
-     `OPTLE_ENGINE` (`mock` for a public site, `auto` + a Claude key for real runs).
-   - `apps/facilitator/.env` — `RELAYER_PRIVATE_KEY` (funded with testnet gas),
-     `RPC_URL`, `CHAIN_ID`.
+   - `apps/server/.env` — `PAY_TO_ADDRESS` (receives native MNT), `PAYMENT_SYMBOL`,
+     `RPC_URL` (used to verify payment txs on-chain), `COS_*`, and `OPTLE_ENGINE`
+     (`mock` for a public site, `auto` + a Claude key for real runs).
 5. Prepare the job dir, build the runner image, and launch:
    ```bash
    sudo mkdir -p /srv/optle-jobs && sudo chmod 777 /srv/optle-jobs
@@ -47,8 +46,8 @@ CORS needed — uploads go through the server, downloads use a presigned GET.
 New site from the repo (`apps/web/netlify.toml` sets the base/build/publish). In
 Site settings → Environment variables set `VITE_API_BASE` to your backend URL
 (e.g. `https://api.yourdomain`) — the app calls it directly. Optionally set
-`VITE_USDC_ADDRESS` (header balance) and `VITE_WALLETCONNECT_PROJECT_ID`. Add your
-custom domain.
+`VITE_WALLETCONNECT_PROJECT_ID` (the header balance reads the wallet's native MNT,
+no token address needed). Add your custom domain.
 
 For a manual CLI deploy, these must be set **at build time** — put them in
 `apps/web/.env.production` (gitignored) or pass inline, then:
@@ -60,8 +59,8 @@ For a manual CLI deploy, these must be set **at build time** — put them in
 - Rebuild the runner after changing `apps/runner/` or the skill:
   `docker compose --profile build build runner`
 - Logs: `docker compose logs -f server` (job runs appear as `[runner <id>]`)
-- The relayer wallet needs gas; top it up if settles fail. For real-AI runs bump
-  `RUNNER_TIMEOUT_MS`.
+- Payments are verified on-chain by the server via `RPC_URL` (no relayer wallet /
+  gas to top up). For real-AI runs bump `RUNNER_TIMEOUT_MS`.
 
 ## Notes
 

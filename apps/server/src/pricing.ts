@@ -4,7 +4,7 @@ import AdmZip from "adm-zip";
  * Size-based pricing. We inspect the uploaded .zip, count the "real" Solidity
  * source files (excluding tests/scripts/libs/build output) and their total
  * bytes, then pick a tier by whichever metric is larger. The resulting price is
- * what the x402 gate charges for this job.
+ * what the 402 payment gate charges for this job (in native MNT).
  */
 
 export type Tier = "small" | "medium" | "large";
@@ -13,12 +13,11 @@ export interface ProjectSizing {
   solFiles: number;
   totalBytes: number;
   tier: Tier;
-  priceUsd: number;
-  /** USDC base units (6 decimals) for the x402 challenge. */
-  amountBaseUnits: string;
+  /** Price in native MNT (human units). */
+  priceMnt: number;
+  /** Price in wei (18 decimals) — the amount the payer must send to payTo. */
+  amountWei: string;
 }
-
-const USDC_DECIMALS = 6;
 
 // Path segments that mark non-source code we should not price on.
 const EXCLUDED_SEGMENTS = new Set([
@@ -37,11 +36,18 @@ function isPricedSolidity(entryName: string): boolean {
   return true;
 }
 
+// Price per tier in native MNT (testnet). Tweak here. Kept small so a single
+// Mantle Sepolia faucet drip covers any tier.
 const PRICE_BY_TIER: Record<Tier, number> = {
-  small: 0.5,
-  medium: 3,
-  large: 10,
+  small: 0.01,
+  medium: 0.05,
+  large: 0.2,
 };
+
+/** Convert a MNT amount (≤3 decimals) to wei without float error. */
+function mntToWei(mnt: number): string {
+  return (BigInt(Math.round(mnt * 1000)) * 10n ** 15n).toString();
+}
 
 function pickTier(solFiles: number, totalBytes: number): Tier {
   const KB = 1024;
@@ -66,7 +72,6 @@ export function priceZip(zipPath: string): ProjectSizing {
   }
 
   const tier = pickTier(solFiles, totalBytes);
-  const priceUsd = PRICE_BY_TIER[tier];
-  const amountBaseUnits = Math.round(priceUsd * 10 ** USDC_DECIMALS).toString();
-  return { solFiles, totalBytes, tier, priceUsd, amountBaseUnits };
+  const priceMnt = PRICE_BY_TIER[tier];
+  return { solFiles, totalBytes, tier, priceMnt, amountWei: mntToWei(priceMnt) };
 }

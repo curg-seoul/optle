@@ -1,4 +1,4 @@
-import type { WalletClient } from "viem";
+import { createPublicClient, http, type WalletClient } from "viem";
 
 /** Result shape produced by the runner (mirrors apps/server jobs.ts). */
 export interface RunnerResult {
@@ -18,7 +18,8 @@ export interface RunnerResult {
 export interface UploadResult {
   jobId: string;
   tier: "small" | "medium" | "large";
-  priceUsd: number;
+  priceMnt: number;
+  amountWei: string;
   solFiles: number;
   totalBytes: number;
   level: 1 | 2;
@@ -29,31 +30,26 @@ export interface JobStatus {
   status: "pending" | "running" | "done" | "error";
   stage: string;
   tier: string;
-  priceUsd: number;
+  priceMnt: number;
   result?: RunnerResult;
   error?: string;
   logs?: string[];
 }
 
+/** Native-payment requirements from the 402 challenge. */
 export interface PaymentRequirements {
-  scheme: string;
+  scheme: string; // "native"
   network: string;
-  maxAmountRequired: string;
+  chainId: number;
+  maxAmountRequired: string; // wei
   payTo: `0x${string}`;
+  symbol: string;
+  decimals: number;
   maxTimeoutSeconds: number;
-  asset: `0x${string}`;
-  extra: { name: string; version: string };
-}
-
-function randomNonce(): `0x${string}` {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return ("0x" +
-    Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")) as `0x${string}`;
 }
 
 // Backend base URL. Empty (default) = same-origin relative paths, which the dev
-// server proxies (see vite.config.ts). In production set VITE_API_BASE to the
-// deployed backend URL (cross-origin; the server allows CORS + the X-PAYMENT header).
+// server proxies (see vite.config.ts). In production set VITE_API_BASE.
 const API = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
 
 async function asJson<T>(res: Response): Promise<T> {
@@ -91,7 +87,10 @@ export async function requestPayment(
   return { kind: "challenge", requirements: reqs };
 }
 
-/** Step 2b: sign the EIP-3009 authorization and retry with X-PAYMENT. */
+/**
+ * Step 2b: send the native MNT payment to payTo, wait for it to be mined, then
+ * retry with the tx hash in X-PAYMENT so the server can verify it on-chain.
+ */
 export async function payForJob(
   jobId: string,
   reqs: PaymentRequirements,
@@ -99,59 +98,27 @@ export async function payForJob(
   account: `0x${string}` | undefined,
   chainId: number | undefined,
 ): Promise<void> {
-  if (!wallet || !account || !chainId) {
-    throw new Error("Connect your wallet (on Mantle Sepolia) to pay.");
+  if (!wallet || !account || !wallet.chain) {
+    throw new Error(`Connect your wallet (on ${reqs.network}) to pay.`);
+  }
+  if (chainId !== undefined && chainId !== reqs.chainId) {
+    throw new Error(`Wrong network — switch your wallet to ${reqs.network} (chainId ${reqs.chainId}).`);
   }
 
-  const authorization = {
-    from: account,
+  // Send the native transfer.
+  const txHash = await wallet.sendTransaction({
+    account,
+    chain: wallet.chain,
     to: reqs.payTo,
     value: BigInt(reqs.maxAmountRequired),
-    validAfter: 0n,
-    validBefore: BigInt(Math.floor(Date.now() / 1000) + (reqs.maxTimeoutSeconds ?? 60)),
-    nonce: randomNonce(),
-  };
-
-  const signature = await wallet.signTypedData({
-    account,
-    domain: {
-      name: reqs.extra.name,
-      version: reqs.extra.version,
-      chainId,
-      verifyingContract: reqs.asset,
-    },
-    types: {
-      TransferWithAuthorization: [
-        { name: "from", type: "address" },
-        { name: "to", type: "address" },
-        { name: "value", type: "uint256" },
-        { name: "validAfter", type: "uint256" },
-        { name: "validBefore", type: "uint256" },
-        { name: "nonce", type: "bytes32" },
-      ],
-    },
-    primaryType: "TransferWithAuthorization",
-    message: authorization,
   });
 
-  const paymentPayload = {
-    x402Version: 1,
-    scheme: reqs.scheme,
-    network: reqs.network,
-    payload: {
-      signature,
-      authorization: {
-        from: authorization.from,
-        to: authorization.to,
-        value: authorization.value.toString(),
-        validAfter: authorization.validAfter.toString(),
-        validBefore: authorization.validBefore.toString(),
-        nonce: authorization.nonce,
-      },
-    },
-  };
-  const xPayment = btoa(JSON.stringify(paymentPayload));
+  // Wait until it's mined so the server can verify the receipt.
+  const publicClient = createPublicClient({ chain: wallet.chain, transport: http() });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+  if (receipt.status !== "success") throw new Error("Payment transaction reverted.");
 
+  const xPayment = btoa(JSON.stringify({ scheme: "native", txHash }));
   const res = await fetch(`${API}/api/optimize/${jobId}`, {
     method: "POST",
     headers: { "X-PAYMENT": xPayment },

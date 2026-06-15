@@ -5,25 +5,26 @@
 # Optle — pay-per-run gas optimization for Solidity
 
 **Optle turns gas optimization into a one-shot, onchain-paid service.** Upload a
-Foundry project, pay per run in **USDC over [x402](https://x402.org)** on
-**Mantle**, and get back a **deployable, test-verified optimized build** — with a
-per-file diff and a measured before/after gas report.
+Foundry project, pay per run in **native MNT** on **Mantle**, and get back a
+**deployable, test-verified optimized build** — with a per-file diff and a
+measured before/after gas report.
 
 What makes it more than an LLM wrapper:
 
 - ⛓️ **Verified, not guessed.** Every change is re-checked against the project's
   own `forge` tests + a gas snapshot. A change that breaks a test or doesn't
   reduce gas is discarded — so outputs are correct and safe by construction.
-- 💸 **Pay-per-run, no accounts.** A single x402 micropayment (gasless EIP-3009
-  signature) gates each run. The same endpoint a human pays through can be called
-  by an agent or CI.
+- 💸 **Pay-per-run, no accounts.** An HTTP-402 challenge gates each run: the wallet
+  sends a native **MNT** transfer to the server's address and the server verifies
+  that transaction on-chain (via RPC) before the job starts. The same endpoint a
+  human pays through can be called by an agent or CI.
 - 📦 **Deployable output.** Optimized code lands in a separate `optimized/`
   directory (originals untouched) with a GitHub-style diff you can review.
 
 ## Flow
 
 ```
-Upload .zip → Pay (USDC / x402) → Isolated container: snapshot → optimize → forge verify → re-measure → Download optimized build
+Upload .zip → Pay (native MNT) → Isolated container: snapshot → optimize → forge verify → re-measure → Download optimized build
 ```
 
 ## Tencent Cloud × Mantle integration
@@ -32,8 +33,8 @@ The whole loop runs on Tencent Cloud and settles on Mantle:
 
 | Layer | Role |
 |---|---|
-| **Mantle Sepolia** | Payment rail. x402 `exact` scheme; a deployed **EIP-3009 USDC** token; a **self-hosted facilitator** verifies the client's signed `transferWithAuthorization` and submits it **on-chain** (no third-party facilitator). Wallet + balance via Mantle RPC. |
-| **Tencent Cloud CVM** | Runs the API server + facilitator and spawns a fresh **isolated Docker runner** per job (`--network none`, CPU/mem/pid limits) so untrusted uploaded code never touches the host. |
+| **Mantle Sepolia** | Payment rail. Pay-per-run in **native MNT**: an HTTP-402 challenge asks the wallet for a tier-priced MNT transfer to the server's address, and the server verifies that transaction **on-chain via Mantle RPC** (mined, successful, correct recipient & amount) before the run starts. Wallet + balance via Mantle RPC. |
+| **Tencent Cloud CVM** | Runs the API server and spawns a fresh **isolated Docker runner** per job (`--network none`, CPU/mem/pid limits) so untrusted uploaded code never touches the host. |
 | **Tencent Cloud COS** | Object storage for each job's `input.zip` / `output.zip`; the optimized build is delivered via a short-lived **presigned URL**. |
 
 ## Optimization quality & safety
@@ -74,13 +75,13 @@ the exact before/after comparison — no trust required.
 
 - **Humans:** drop a `.zip`, pay, download — a deployable build, no local agent or
   API keys.
-- **Agents / CI:** the x402-gated HTTP endpoint is account-less and machine-native;
+- **Agents / CI:** the 402-gated HTTP endpoint is account-less and machine-native;
   a bot or pipeline can pay-and-optimize the same way the UI does.
 - **Mantle builders:** lowers the barrier to shipping cheaper contracts without
   hand-auditing every SLOAD.
 
-Pricing scales with project size (from the uploaded `.zip`): **$0.50 / $3 / $10**
-(small / medium / large), injected into the x402 challenge per job.
+Pricing scales with project size (from the uploaded `.zip`): **0.01 / 0.05 / 0.2
+MNT** (small / medium / large), injected into the 402 challenge per job.
 
 ## Demo
 
@@ -94,10 +95,8 @@ var away.
 
 ```
 apps/web/          React + wagmi/viem/RainbowKit (landing + step-based app)
-apps/server/       Express x402 gate: /upload, /optimize/:jobId, /status, /download
-apps/facilitator/  Self-hosted x402 facilitator (verify + on-chain settle)
+apps/server/       Express 402 gate + on-chain payment verify: /upload, /optimize/:jobId, /status, /download
 apps/runner/       Isolated optimizer image (Foundry + Node + Claude Agent SDK)
-contracts/         Foundry: EIP-3009 TestUSDC + Mantle Sepolia deploy script
 skills/            gas-optimizer skill (SKILL.md + pattern corpus)
 examples/          staking-demo — reproducible benchmark project (25 tests)
 ```
@@ -116,9 +115,9 @@ full instructions in [DEPLOY.md](DEPLOY.md).
 
 ## Tech
 
-Solidity / Foundry · x402 + EIP-3009 USDC · Mantle Sepolia · Tencent Cloud (CVM +
-COS) · Caddy · Docker · Node/TypeScript/Express · viem · React/Vite · wagmi +
-RainbowKit · Claude Agent SDK · Netlify.
+Solidity / Foundry · HTTP-402 pay-per-run · native MNT · Mantle Sepolia · Tencent
+Cloud (CVM + COS) · Caddy · Docker · Node/TypeScript/Express · viem · React/Vite ·
+wagmi + RainbowKit · Claude Agent SDK · Netlify.
 
 > Testnet-only hackathon build: keys are testnet-only and live in gitignored
 > `.env` files; job state is in-memory; no auth/rate-limiting. Not for mainnet as-is.

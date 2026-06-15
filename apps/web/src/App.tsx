@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useAccount, useWalletClient, useReadContract } from "wagmi";
-import { formatUnits, erc20Abi } from "viem";
+import { useAccount, useWalletClient, useBalance } from "wagmi";
 import { ThemeToggle } from "./theme";
 import { Logo } from "./Landing";
 import {
@@ -15,26 +14,19 @@ import {
   type PaymentRequirements,
 } from "./x402";
 
-// Payment token (e.g. TestUSDC on Mantle Sepolia). Configured per deployment;
-// when unset, the header balance is simply hidden.
-const USDC_ADDRESS = import.meta.env.VITE_USDC_ADDRESS as `0x${string}` | undefined;
-const USDC_DECIMALS = Number(import.meta.env.VITE_USDC_DECIMALS ?? 6);
-
-function UsdcBalance() {
+function MntBalance() {
   const { address } = useAccount();
-  const { data, isLoading } = useReadContract({
-    address: USDC_ADDRESS,
-    abi: erc20Abi,
-    functionName: "balanceOf",
-    args: address ? [address] : undefined,
-    query: { enabled: !!address && !!USDC_ADDRESS, refetchInterval: 10_000 },
+  // Native token balance (MNT) — no token address needed.
+  const { data, isLoading } = useBalance({
+    address,
+    query: { enabled: !!address, refetchInterval: 10_000 },
   });
-  if (!address || !USDC_ADDRESS) return null;
+  if (!address) return null;
   const text =
     data === undefined
       ? isLoading ? "…" : "—"
-      : Number(formatUnits(data, USDC_DECIMALS)).toLocaleString(undefined, { maximumFractionDigits: 2 });
-  return <span className="usdc-balance">{text} USDC</span>;
+      : Number(data.formatted).toLocaleString(undefined, { maximumFractionDigits: 4 });
+  return <span className="usdc-balance">{text} {data?.symbol ?? "MNT"}</span>;
 }
 
 function LogPanel({ logs }: { logs?: string[] }) {
@@ -210,7 +202,7 @@ export function App() {
         </div>
         <div className="header-right">
           <ThemeToggle />
-          <UsdcBalance />
+          <MntBalance />
           <ConnectButton showBalance={false} chainStatus="icon" />
         </div>
       </header>
@@ -280,13 +272,13 @@ export function App() {
                       <span className="pay-label">{upload.solFiles} Files · {(upload.totalBytes / 1024).toFixed(1)} KB</span>
                       <div className="pay-tier">Tier {upload.tier} · Level {upload.level}</div>
                     </div>
-                    <span className="pay-amount">${upload.priceUsd.toFixed(2)}</span>
+                    <span className="pay-amount">{upload.priceMnt} MNT</span>
                   </div>
                   <div className="pay-actions">
                     <button className="ghost" onClick={startOver} disabled={busy}>Cancel</button>
                     {phase === "paying"
-                      ? <button className="primary" disabled>Awaiting Signature…</button>
-                      : <button className="primary" onClick={onPay} disabled={busy}>{`Pay $${upload.priceUsd.toFixed(2)} & Optimize`}</button>}
+                      ? <button className="primary" disabled>Awaiting payment…</button>
+                      : <button className="primary" onClick={onPay} disabled={busy}>{`Pay ${upload.priceMnt} MNT & Optimize`}</button>}
                   </div>
                 </div>
               )}

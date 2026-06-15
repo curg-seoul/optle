@@ -40,7 +40,7 @@ app.get("/health", (_req, res) => {
     ok: true,
     network: config.payment.network,
     chainId: config.payment.chainId,
-    asset: config.payment.asset.name,
+    token: config.payment.symbol,
     cos: cosEnabled,
   });
 });
@@ -74,7 +74,8 @@ app.post("/api/upload", upload.single("project"), async (req, res) => {
     res.json({
       jobId,
       tier: sizing.tier,
-      priceUsd: sizing.priceUsd,
+      priceMnt: sizing.priceMnt,
+      amountWei: sizing.amountWei,
       solFiles: sizing.solFiles,
       totalBytes: sizing.totalBytes,
       level,
@@ -92,7 +93,7 @@ app.post("/api/upload", upload.single("project"), async (req, res) => {
  */
 app.post(
   "/api/optimize/:jobId",
-  paymentGate((req) => getJob(req.params.jobId)?.sizing.amountBaseUnits),
+  paymentGate((req) => getJob(req.params.jobId)?.sizing.amountWei),
   (req, res) => {
     const job = getJob(req.params.jobId);
     if (!job) {
@@ -120,7 +121,7 @@ app.get("/api/status/:jobId", (req, res) => {
     status: job.status,
     stage: job.stage,
     tier: job.sizing.tier,
-    priceUsd: job.sizing.priceUsd,
+    priceMnt: job.sizing.priceMnt,
     result: job.result,
     error: job.error,
     logs: job.logs.slice(-500), // recent runner output for the live log panel
@@ -150,9 +151,9 @@ app.listen(config.port, () => {
   const p = config.payment;
   console.log(`optle optimize server → http://localhost:${config.port}`);
   console.log(`  network:     ${p.network} (chainId ${p.chainId})`);
-  console.log(`  pricing:     tier-based ($0.5 / $3 / $10), paid in ${p.asset.name}`);
+  console.log(`  pricing:     tier-based (0.01 / 0.05 / 0.2 ${p.symbol}), paid in native ${p.symbol}`);
   console.log(`  pay to:      ${p.payTo}`);
-  console.log(`  facilitator: ${config.facilitator.url}${config.facilitator.apiKey ? "" : "  (no API key set)"}`);
+  console.log(`  rpc:         ${p.rpcUrl} (verifies payment tx on-chain)`);
   console.log(`  COS:         ${cosEnabled ? `${config.cos.bucket} (${config.cos.region})` : "NOT configured"}`);
   console.log(`  runner:      ${config.runner.image} (jobs at ${config.runner.jobsDir})`);
 
